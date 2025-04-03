@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 st.title("Academic Program Spreadsheet Generator")
 
 st.write("Enter the base URL for academic programs and a comma-separated list of title tags (or CSS selectors).")
-base_url = st.text_input("Enter base URL", value="https://www.ithaca.edu/academics")
+base_url = st.text_input("Enter base URL", value="https://www.ithaca.edu/academics/majors-minors")
 
 st.markdown("**Title Tag Flexibility:** Specify a comma-separated list of HTML tags or CSS selectors to locate the program title. For example: `h1,h2,div.program-title`")
 title_tags_input = st.text_input("Title tags to search", value="h1,h2")
@@ -17,6 +17,11 @@ if st.button("Create Spreadsheet"):
         st.error("Please enter a valid base URL.")
     else:
         st.write("Crawling the website—this may take a few moments...")
+
+        # Determine the last element of the base URL's path.
+        parsed = urlparse(base_url)
+        base_path = parsed.path.rstrip("/")
+        base_last = base_path.split("/")[-1] if base_path else ""
 
         # Convert the comma-separated string into a list of tags/selectors.
         title_tags = [tag.strip() for tag in title_tags_input.split(",") if tag.strip()]
@@ -61,7 +66,7 @@ if st.button("Create Spreadsheet"):
                 response = requests.get(url, timeout=10)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, "html.parser")
-                    # Try each provided tag until a valid title is found
+                    # Try each provided tag until a valid title is found.
                     program_title = None
                     for tag in title_tags:
                         candidate = soup.select_one(tag)
@@ -70,23 +75,22 @@ if st.button("Create Spreadsheet"):
                             break
 
                     if program_title:
-                        # Compute the URL suffix (the part after the base URL)
-                        suffix = url.replace(base_url, "").lstrip("/")
-                        if suffix:
-                            parts = suffix.split("/")
-                            if len(parts) >= 2:
-                                directory = parts[0]
+                        # Compute the raw URL suffix (the part after the base URL)
+                        raw_suffix = url.replace(base_url, "").lstrip("/")
+                        if raw_suffix:
+                            # Prepend the last element of the base URL to form column C.
+                            suffix = f"{base_last}/{raw_suffix}"
+                            parts = raw_suffix.split("/")  # parts from the raw suffix
+                            if parts:
                                 program_slug = parts[-1]
-                                # Build regex pattern: if there's a dash, use the part after it; otherwise use the whole slug.
+                                # Build regex pattern using base_last as directory.
                                 if "-" in program_slug:
                                     suffix_end = program_slug.split("-")[-1]
-                                    pattern = f"/{directory}/.*{suffix_end}"
+                                    pattern = f"/{base_last}/.*{suffix_end}"
                                 else:
-                                    pattern = f"/{directory}/.*"
+                                    pattern = f"/{base_last}/.*"
                             else:
-                                # Only one segment present; use it as directory
-                                directory = parts[0]
-                                pattern = f"/{directory}/.*"
+                                pattern = f"/{base_last}/.*"
                             
                             results.append({
                                 "A": program_title,
