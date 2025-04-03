@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import re
 from urllib.parse import urljoin
 
 st.title("Academic Program Spreadsheet Generator")
@@ -73,16 +72,20 @@ if st.button("Create Spreadsheet"):
                     if program_title:
                         # Compute the URL suffix (the part after the base URL)
                         suffix = url.replace(base_url, "").lstrip("/")
-                        parts = suffix.split("/")
-                        # Process only pages with a suffix that has two segments (e.g. "majors-minors/acting-bfa")
-                        if suffix and "-" in suffix and len(parts) == 2:
-                            directory = parts[0]
-                            program_slug = parts[1]
-                            # Create the regex pattern from the text after the last dash of the program slug.
-                            if "-" in program_slug:
-                                suffix_end = program_slug.split("-")[-1]
-                                pattern = f"/{directory}/.*{suffix_end}"
+                        if suffix:
+                            parts = suffix.split("/")
+                            if len(parts) >= 2:
+                                directory = parts[0]
+                                program_slug = parts[-1]
+                                # Build regex pattern: if there's a dash, use the part after it; otherwise use the whole slug.
+                                if "-" in program_slug:
+                                    suffix_end = program_slug.split("-")[-1]
+                                    pattern = f"/{directory}/.*{suffix_end}"
+                                else:
+                                    pattern = f"/{directory}/.*"
                             else:
+                                # Only one segment present; use it as directory
+                                directory = parts[0]
                                 pattern = f"/{directory}/.*"
                             
                             results.append({
