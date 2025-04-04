@@ -1,17 +1,27 @@
 import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
 
-# Set up the Streamlit app title and description.
+# Print Streamlit version for debugging purposes.
+st.write("Streamlit version:", st.__version__)
+
+# Fallback function for experimental_rerun
+def safe_rerun():
+    if hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+    else:
+        st.warning("Please refresh the page manually to proceed.")
+
+# Set up the app title and description.
 st.title("Web Scraping AI Agent 🕵️‍♂️")
 st.caption("Scrape institution websites using GPT-4o-mini on Streamlit Cloud.")
 
-# Retrieve OpenAI API key from Streamlit secrets.
-# Ensure your secrets.toml file has an entry like:
+# Retrieve the OpenAI API key from Streamlit secrets.
+# Ensure your .streamlit/secrets.toml file has:
 # [openai]
-# api_key = "your_openai_api_key"
+# api_key = "your_openai_api_key_here"
 openai_api_key = st.secrets["openai"]["api_key"]
 
-# Define configuration to use GPT-4o-mini.
+# Define the configuration to use GPT-4o-mini.
 graph_config = {
     "llm": {
         "api_key": openai_api_key,
@@ -19,7 +29,7 @@ graph_config = {
     },
 }
 
-# Initialize session state to manage multi-step user input.
+# Initialize session state to manage the multi-step process.
 if "step" not in st.session_state:
     st.session_state.step = 1
 
@@ -29,7 +39,7 @@ if st.session_state.step == 1:
     if institution_name:
         st.session_state.institution_name = institution_name
         st.session_state.step = 2
-        st.experimental_rerun()
+        safe_rerun()
 
 # Step 2: Ask for the institution's homepage URL.
 elif st.session_state.step == 2:
@@ -37,27 +47,27 @@ elif st.session_state.step == 2:
     if homepage_url:
         st.session_state.homepage_url = homepage_url
         st.session_state.step = 3
-        st.experimental_rerun()
+        safe_rerun()
 
 # Step 3: Ask for details about programs, program levels, and departments.
 elif st.session_state.step == 3:
     program_info = st.text_area(
-        "Enter the details about the programs you want scraped. " +
-        "Include program names, desired levels (Undergraduate, Master's, PhD), " +
+        "Enter details about the programs you want scraped. "
+        "Include program names, desired levels (Undergraduate, Master's, PhD), "
         "and specific schools/colleges/departments (e.g., College of Education):"
     )
     if program_info:
         st.session_state.program_info = program_info
         st.session_state.step = 4
-        st.experimental_rerun()
+        safe_rerun()
 
 # Step 4: List all discovered URLs for manual validation.
 elif st.session_state.step == 4:
     st.subheader("Step 4: Validate Discovered URLs")
     st.write(
-        "The app will now scrape the homepage for pages related to your input. " +
-        "Below is a list of URLs that the scraper found. Please click each link to test " +
-        "that they are valid and do not lead to 404 errors. When you are satisfied with " +
+        "The app will now scrape the homepage for pages related to your input. "
+        "Below is a list of URLs that the scraper found. Please click each link to test "
+        "that they are valid and do not lead to 404 errors. When you are satisfied with "
         "the results, click the 'Create Tabular Output' button."
     )
     # Build a prompt for the scraper to list valid URLs.
@@ -74,7 +84,7 @@ elif st.session_state.step == 4:
     
     if st.button("List URLs"):
         result = smart_scraper_graph.run()
-        # Assuming result is a string containing URLs (one per line) or a list.
+        # Assume result is a string containing URLs (one per line) or a list.
         urls = []
         if isinstance(result, list):
             urls = result
@@ -86,8 +96,8 @@ elif st.session_state.step == 4:
             for url in urls:
                 st.markdown(f"[{url}]({url})")
             st.session_state.urls = urls
-            # Move to the next step once URLs are listed.
             st.session_state.step = 5
+            safe_rerun()
         else:
             st.error("No URLs found. Please check your inputs or try again.")
 
@@ -95,13 +105,13 @@ elif st.session_state.step == 4:
 elif st.session_state.step == 5:
     st.subheader("Step 5: Create Tabular Output")
     st.write(
-        "Once you have validated the above links, click the button below to generate the table. " +
+        "Once you have validated the above links, click the button below to generate the table. "
         "The table will have the following columns:\n\n"
-        "- **Column A:** Program name (as identified from an h1 or similar tag on the page)\n"
+        "- **Column A:** Program name (extracted from an h1 tag or similar element on the page)\n"
         "- **Column B:** The corresponding valid URL of the academic program page\n"
-        "- **Column C:** The URL elements after the base URL (e.g., for 'https://www.example.edu/academics/majors/accounting', output 'academics/majors/accounting')\n"
+        "- **Column C:** The part of the URL after the base URL (e.g., for 'https://www.example.edu/academics/majors/accounting', output 'academics/majors/accounting')\n"
         "- **Columns D, E, F:** (Leave these blank)\n"
-        "- **Column G:** A regex pattern for Column C (e.g., '/academics/majors/.*accounting')"
+        "- **Column G:** A regex pattern for Column C (for example, '/academics/majors/.*accounting')"
     )
     
     if st.button("Create Tabular Output"):
@@ -124,7 +134,8 @@ elif st.session_state.step == 5:
         st.write("### Tabular Output")
         st.markdown(table_result)
         st.session_state.step = 6
+        safe_rerun()
 
-# Final step: Completion message.
+# Final Step: Completion message.
 elif st.session_state.step == 6:
     st.success("Scraping and table creation complete.")
