@@ -45,7 +45,7 @@ if st.button("Create Spreadsheet"):
                             for a in soup.find_all("a", href=True):
                                 href = a["href"]
                                 full_url = urljoin(base_url, href)
-                                # Only follow links that start with the base URL and do not contain forbidden keywords
+                                # Only follow links that start with the base URL and do not contain forbidden keywords.
                                 if full_url.startswith(base_url) and full_url not in visited:
                                     if not any(keyword in full_url.lower() for keyword in forbidden_keywords):
                                         to_crawl.append((full_url, depth + 1))
@@ -73,12 +73,11 @@ if st.button("Create Spreadsheet"):
                     if program_title:
                         # Compute the URL suffix (the part after the base URL)
                         suffix = url.replace(base_url, "").lstrip("/")
-                        parts = suffix.split("/")
-                        # Process only pages with a suffix that has two segments (e.g. "majors-minors/acting-bfa")
-                        if suffix and "-" in suffix and len(parts) == 2:
-                            directory = parts[0]
-                            program_slug = parts[1]
-                            # Create the regex pattern from the text after the last dash of the program slug.
+                        if suffix:  # Ensure suffix is non-empty
+                            parts = suffix.split("/")
+                            directory = parts[0] if parts else ""
+                            # If the last part has a hyphen, try to extract a specific ending
+                            program_slug = parts[-1] if parts else ""
                             if "-" in program_slug:
                                 suffix_end = program_slug.split("-")[-1]
                                 pattern = f"/{directory}/.*{suffix_end}"
