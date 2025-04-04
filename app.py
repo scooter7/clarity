@@ -6,7 +6,7 @@ from urllib.parse import urljoin, urlparse
 import re
 import openai
 
-# Get OpenAI key from environment or secrets
+# Securely load OpenAI key
 try:
     openai_api_key = st.secrets["openai"]["api_key"]
 except Exception:
@@ -19,7 +19,7 @@ if not openai_api_key:
 openai.api_key = openai_api_key
 
 st.title("🎓 Academic Program Scraper")
-st.caption("Find program pages using your own filters — no browser needed.")
+st.caption("Crawls and extracts academic program pages using your filters.")
 
 # Step manager
 if "step" not in st.session_state:
@@ -41,17 +41,17 @@ elif st.session_state.step == 2:
         st.session_state.step = 3
         st.rerun()
 
-# Step 3: Desired program filters
+# Step 3: Filters
 elif st.session_state.step == 3:
-    filters = st.text_area("What programs, levels, or departments are you looking for?")
+    filters = st.text_area("What programs, levels, or departments are you looking for?\nExample: Engineering, Business, Computer Science, Undergraduate")
     if filters:
         st.session_state.user_filters = filters
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Crawl site for matching URLs
+# Step 4: Crawl and match links
 elif st.session_state.step == 4:
-    st.subheader("Step 4: Crawl homepage for links")
+    st.subheader("Step 4: Crawl homepage for matching links")
 
     if st.button("Crawl and Find Academic Pages"):
         homepage = st.session_state.homepage_url
@@ -59,35 +59,44 @@ elif st.session_state.step == 4:
             r = requests.get(homepage, timeout=10)
             soup = BeautifulSoup(r.text, "html.parser")
             found = set()
+            matched = set()
+
+            filters = [f.strip().lower() for f in st.session_state.user_filters.split(",")]
 
             for a in soup.find_all("a", href=True):
                 href = a["href"]
+                text = a.get_text().strip().lower()
                 full = urljoin(homepage, href)
                 parsed = urlparse(full)
+
                 if homepage in full and parsed.scheme.startswith("http"):
                     found.add(full)
 
-            # Filter based on user filters
-            filters = st.session_state.user_filters.lower().split(",")
-            filtered_links = [link for link in found if any(f.strip() in link.lower() for f in filters)]
+                    if any(f in text or f in href.lower() for f in filters):
+                        matched.add(full)
 
-            if filtered_links:
-                st.session_state.filtered_links = filtered_links
-                st.success(f"Found {len(filtered_links)} links based on your filter:")
-                for link in filtered_links:
-                    st.markdown(f"- [{link}]({link})")
-                st.session_state.step = 5
-                st.rerun()
+            # Decide what to show
+            if matched:
+                st.session_state.filtered_links = list(matched)
+                st.success(f"✅ Found {len(matched)} matching links:")
             else:
-                st.warning("No matching links found. Try broadening your keywords.")
+                st.warning("⚠️ No links matched your filters. Showing all links instead.")
+                st.session_state.filtered_links = list(found)
+
+            for url in st.session_state.filtered_links:
+                st.markdown(f"- [{url}]({url})")
+
+            st.session_state.step = 5
+            st.rerun()
+
         except Exception as e:
             st.error(f"Failed to crawl homepage: {e}")
 
-# Step 5: Use GPT to extract program names
+# Step 5: Extract program names using GPT
 elif st.session_state.step == 5:
-    st.subheader("Step 5: Use GPT to extract program names from matching pages")
+    st.subheader("Step 5: Use GPT to extract program names")
 
-    if st.button("Extract Programs"):
+    if st.button("Extract Program Names"):
         output = []
         base_url = st.session_state.homepage_url.rstrip("/")
         filters = st.session_state.user_filters
@@ -99,11 +108,11 @@ elif st.session_state.step == 5:
 
                 system_msg = "You are a helpful assistant extracting academic program titles from web pages."
                 user_msg = (
-                    f"Here is the HTML content of a page from a university website. "
-                    f"The user is looking for programs related to: {filters}. "
-                    f"Please return ONLY the program name or title(s) that this page represents. "
-                    f"Use the exact text found in <h1> or similar heading tags if possible.\n\n"
-                    f"{html_text[:3000]}..."  # truncate to avoid token limits
+                    f"Here is the HTML of a university page. "
+                    f"The user is interested in: {filters}. "
+                    f"Return only the name(s) of the academic program(s) listed on the page. "
+                    f"Use text from <h1> or similar prominent heading tags if available.\n\n"
+                    f"{html_text[:3000]}..."
                 )
 
                 completion = openai.ChatCompletion.create(
@@ -122,16 +131,16 @@ elif st.session_state.step == 5:
                 output.append((result, url, relative_path, "", "", "", pattern))
 
             except Exception as e:
-                st.warning(f"Skipped {url}: {e}")
+                st.warning(f"⚠️ Skipped {url}: {e}")
 
         if output:
             st.session_state.program_output = output
             st.session_state.step = 6
             st.rerun()
         else:
-            st.warning("No programs could be extracted.")
+            st.warning("No programs were extracted.")
 
-# Step 6: Display final table
+# Step 6: Final table
 elif st.session_state.step == 6:
     st.subheader("✅ Final Program Table")
 
