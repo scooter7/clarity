@@ -1,8 +1,9 @@
 import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
 import os
+import re
 
-# ✅ Securely get OpenAI API key from secrets.toml (for local dev) or env variable (for Railway)
+# ✅ Secure OpenAI API key
 try:
     openai_api_key = st.secrets["openai"]["api_key"]
 except Exception:
@@ -12,11 +13,9 @@ if not openai_api_key:
     st.error("⚠️ OpenAI API key not found. Please set it as an environment variable on Railway.")
     st.stop()
 
-# ✅ Streamlit UI
 st.title("Web Scraping AI Agent 🕵️‍♂️")
 st.caption("Scrape academic program info from institution websites using GPT-4o-mini.")
 
-# ✅ ScrapeGraphAI config
 graph_config = {
     "llm": {
         "api_key": openai_api_key,
@@ -24,11 +23,10 @@ graph_config = {
     },
 }
 
-# ✅ Step tracking
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# ✅ Step 1: Institution Name
+# Step 1: Institution name
 if st.session_state.step == 1:
     name = st.text_input("Enter the institution name:")
     if name:
@@ -36,7 +34,7 @@ if st.session_state.step == 1:
         st.session_state.step = 2
         st.rerun()
 
-# ✅ Step 2: Institution Homepage URL
+# Step 2: Homepage URL
 elif st.session_state.step == 2:
     homepage = st.text_input("Enter the institution’s homepage URL:")
     if homepage:
@@ -44,7 +42,7 @@ elif st.session_state.step == 2:
         st.session_state.step = 3
         st.rerun()
 
-# ✅ Step 3: Desired Programs
+# Step 3: Programs, levels, departments
 elif st.session_state.step == 3:
     info = st.text_area("Enter program names, levels (UG, MS, PhD), and departments (e.g. College of Business):")
     if info:
@@ -52,7 +50,7 @@ elif st.session_state.step == 3:
         st.session_state.step = 4
         st.rerun()
 
-# ✅ Step 4: Scrape for Links
+# Step 4: Scrape for links
 elif st.session_state.step == 4:
     st.subheader("Validate URLs")
     st.write("Click below to list discovered academic program URLs. Then manually test to ensure none are 404s.")
@@ -67,10 +65,16 @@ elif st.session_state.step == 4:
             source=st.session_state.homepage_url,
             config=graph_config
         )
+
         try:
             result = scraper.run()
-            answer_text = result["answer"] if isinstance(result, dict) and "answer" in result else str(result)
-            urls = [line.strip() for line in answer_text.splitlines() if line.strip()]
+            answer_text = result.get("answer", "") if isinstance(result, dict) else str(result)
+
+            st.markdown("### 🔍 Raw Output from Scraper")
+            st.code(answer_text)
+
+            # Extract all valid-looking URLs
+            urls = re.findall(r'https?://[^\s\)\]]+', answer_text)
 
             if urls:
                 st.session_state.urls = urls
@@ -80,11 +84,11 @@ elif st.session_state.step == 4:
                 st.session_state.step = 5
                 st.rerun()
             else:
-                st.error("No URLs found.")
+                st.warning("No URLs matched. Check the raw output above.")
         except Exception as e:
             st.error(f"Scraping failed: {e}")
 
-# ✅ Step 5: Generate Tabular Output
+# Step 5: Generate table
 elif st.session_state.step == 5:
     st.subheader("Generate Tabular Output")
     st.write("Creates a table with program names, URLs, and structured patterns.")
@@ -103,17 +107,25 @@ elif st.session_state.step == 5:
             source=st.session_state.homepage_url,
             config=graph_config
         )
+
         try:
             result = scraper.run()
-            answer_text = result["answer"] if isinstance(result, dict) and "answer" in result else str(result)
-            st.markdown("### Tabular Output")
-            st.markdown(answer_text)
-            st.session_state.step = 6
-            st.rerun()
+            answer_text = result.get("answer", "") if isinstance(result, dict) else str(result)
+
+            st.markdown("### 📋 Raw Tabular Output")
+            st.code(answer_text)
+
+            if "|" in answer_text and "---" in answer_text:
+                st.markdown("### ✅ Parsed Markdown Table")
+                st.markdown(answer_text)
+                st.session_state.step = 6
+                st.rerun()
+            else:
+                st.warning("No valid Markdown table format detected. Check the output above.")
         except Exception as e:
             st.error(f"Tabular output failed: {e}")
 
-# ✅ Step 6: Done
+# Step 6: Done
 elif st.session_state.step == 6:
     st.success("✅ Scraping and table complete!")
     st.balloons()
