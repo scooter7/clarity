@@ -6,9 +6,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 
@@ -18,6 +15,17 @@ st.write("Enter the base URL for academic programs, the HTML tag(s) to search fo
 base_url = st.text_input("Enter base URL", value="https://admissions.msu.edu/academics/majors-degrees-programs")
 title_tags_input = st.text_input("Title tags to search", value="h1")
 max_depth = st.selectbox("Select maximum crawl depth", [1, 2, 3, 4, 5], index=1)
+
+def scroll_page(driver, pause_time=2):
+    """Scroll to the bottom of the page until no more content loads."""
+    last_height = driver.execute_script("return document.body.scrollHeight")
+    while True:
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(pause_time)
+        new_height = driver.execute_script("return document.body.scrollHeight")
+        if new_height == last_height:
+            break
+        last_height = new_height
 
 if st.button("Create Spreadsheet"):
     if not base_url:
@@ -33,17 +41,17 @@ if st.button("Create Spreadsheet"):
         # Use the installed Chromium binary (adjust path if needed)
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        # Force webdriver-manager to use the ChromeDriver version matching your browser.
-        # (Here we use driver_version; ensure your webdriver-manager is up to date)
+        # Force webdriver-manager to get the driver matching Chrome version 120.
         service = Service(ChromeDriverManager(driver_version="120.0.6099.224").install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(180)
 
         # Convert the comma-separated title tags into a list.
         title_tags = [tag.strip() for tag in title_tags_input.split(",") if tag.strip()]
 
         def crawl_website_dynamic(base_url, max_depth):
             """
-            Crawl pages under the base URL using Selenium (with explicit waits)
+            Crawl pages under the base URL using Selenium (with scrolling)
             up to a given depth while skipping URLs with forbidden keywords.
             """
             forbidden_keywords = ["faculty", "catalog", "directory"]
@@ -58,22 +66,17 @@ if st.button("Create Spreadsheet"):
                 visited.add(current_url)
                 try:
                     driver.get(current_url)
-                    # Example explicit wait:
-                    # Wait up to 30 seconds for an element that indicates the dynamic content has loaded.
-                    # Adjust the CSS selector below to one that reliably appears on your target site.
-                    try:
-                        WebDriverWait(driver, 30).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, "div.program-list"))
-                        )
-                    except Exception:
-                        st.write(f"Warning: Expected container not found on {current_url}")
-                    time.sleep(2)  # Additional sleep may be helpful
+                    # Wait for the page to load and simulate scrolling.
+                    time.sleep(2)
+                    scroll_page(driver, pause_time=2)
                     html = driver.page_source
                     soup = BeautifulSoup(html, "html.parser")
                     if depth < max_depth:
+                        # Look for all links on the page.
                         for a in soup.find_all("a", href=True):
                             href = a["href"]
                             full_url = urljoin(base_url, href)
+                            # Only consider links that start with the base URL.
                             if full_url.startswith(base_url) and full_url not in visited:
                                 if not any(keyword in full_url.lower() for keyword in forbidden_keywords):
                                     to_crawl.append((full_url, depth + 1))
@@ -84,7 +87,7 @@ if st.button("Create Spreadsheet"):
         all_urls = crawl_website_dynamic(base_url, max_depth)
         st.write(f"Found {len(all_urls)} pages. Extracting program information...")
 
-        # Use the last element of the base URL's path for output columns.
+        # Use the last element of the base URL's path for columns C and G.
         parsed = urlparse(base_url)
         base_path = parsed.path.rstrip("/")
         base_last = base_path.split("/")[-1] if base_path else ""
@@ -93,16 +96,11 @@ if st.button("Create Spreadsheet"):
         for url in all_urls:
             try:
                 driver.get(url)
-                try:
-                    WebDriverWait(driver, 30).until(
-                        EC.presence_of_element_located((By.TAG_NAME, "body"))
-                    )
-                except Exception:
-                    st.write(f"Warning: 'body' tag not found on {url}")
                 time.sleep(2)
+                scroll_page(driver, pause_time=2)
                 html = driver.page_source
                 soup = BeautifulSoup(html, "html.parser")
-                # Look for a program title using one of the specified tags.
+                # Try to extract the program title using the specified tags.
                 program_title = None
                 for tag in title_tags:
                     candidate = soup.select_one(tag)
