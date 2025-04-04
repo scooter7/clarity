@@ -3,6 +3,7 @@ import pandas as pd
 import time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -20,12 +21,13 @@ if st.button("Create Spreadsheet"):
     else:
         st.write("Crawling the website dynamically. This may take some time...")
 
-        # Set up Selenium Chrome in headless mode.
+        # Set up Selenium Chrome in headless mode using Service.
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(ChromeDriverManager().install(), options=chrome_options)
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
 
         # Convert the comma-separated title tags into a list.
         title_tags = [tag.strip() for tag in title_tags_input.split(",") if tag.strip()]
@@ -85,14 +87,15 @@ if st.button("Create Spreadsheet"):
                         break
 
                 if program_title:
-                    # Compute the raw URL suffix (the part after the base URL).
+                    # Compute the raw URL suffix (the part after the base URL)
                     raw_suffix = url.replace(base_url, "").lstrip("/")
                     if raw_suffix:
-                        # Prepend the last element from the base URL.
+                        # Prepend the last element from the base URL to form column C.
                         suffix = f"{base_last}/{raw_suffix}"
                         parts = raw_suffix.split("/")
                         if parts:
                             program_slug = parts[-1]
+                            # Create the regex pattern using base_last as the directory.
                             if "-" in program_slug:
                                 suffix_end = program_slug.split("-")[-1]
                                 pattern = f"/{base_last}/.*{suffix_end}"
