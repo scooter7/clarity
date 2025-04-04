@@ -7,30 +7,26 @@ import re
 import openai
 import pandas as pd
 
-# ✅ Get OpenAI API key from Railway environment variable or secrets
-openai.api_key = (
-    st.secrets["openai"]["api_key"]
-    if "openai" in st.secrets and "api_key" in st.secrets["openai"]
-    else os.getenv("OPENAI_API_KEY")
-)
+# ✅ Get OpenAI API key from Railway environment variable
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 if not openai.api_key:
-    st.error("⚠️ OpenAI API key not found. Add it to Railway environment variables or Streamlit secrets.")
+    st.error("⚠️ OpenAI API key not found. Set OPENAI_API_KEY as an environment variable on Railway.")
     st.stop()
 
-# ✅ UI Setup
-st.title("🎯 Granular Program Page Finder")
-st.caption("Find Master's and PhD program pages from specified schools and departments.")
+# App UI
+st.title("🎯 Academic Program Page Finder")
+st.caption("Find Master’s and PhD programs from specific schools/departments on university websites using GPT-4o.")
 
-# Step-by-step input flow
+# Step state
 if "step" not in st.session_state:
     st.session_state.step = 1
 
 # Step 1: Institution Name
 if st.session_state.step == 1:
-    inst = st.text_input("Enter the institution name:")
-    if inst:
-        st.session_state.institution_name = inst
+    name = st.text_input("Enter the institution name:")
+    if name:
+        st.session_state.institution_name = name
         st.session_state.step = 2
         st.rerun()
 
@@ -42,19 +38,19 @@ elif st.session_state.step == 2:
         st.session_state.step = 3
         st.rerun()
 
-# Step 3: Program levels and departments
+# Step 3: Program Criteria
 elif st.session_state.step == 3:
     criteria = st.text_area(
-        "Enter what you're looking for (e.g., Master's and PhD programs from the School of Engineering, School of Medicine...)"
+        "What are you looking for?\n\nExample: “I want Master's and PhD programs only from the School of Engineering, School of Medicine, Weatherhead School of Management, and Mandel School of Applied Social Sciences.”"
     )
     if criteria:
         st.session_state.criteria = criteria
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Crawl and analyze
+# Step 4: Crawl site
 elif st.session_state.step == 4:
-    st.info("🔍 Crawling and analyzing the site...")
+    st.info("🔍 Crawling the site...")
 
     def get_links(base_url):
         visited = set()
@@ -84,64 +80,63 @@ elif st.session_state.step == 4:
 
         return list(found_urls)
 
-    with st.spinner("Crawling the site for pages..."):
-        all_links = get_links(st.session_state.homepage)
+    with st.spinner("Finding all internal URLs..."):
+        links = get_links(st.session_state.homepage)
 
-    st.success(f"🔗 Found {len(all_links)} URLs")
-    st.session_state.crawled_links = all_links
+    st.success(f"🔗 Found {len(links)} URLs")
+    st.session_state.crawled_links = links
     st.session_state.step = 5
     st.rerun()
 
-# Step 5: Use OpenAI to filter & extract actual program pages
+# Step 5: Use GPT to filter program pages
 elif st.session_state.step == 5:
-    st.info("🔎 Filtering program-level pages using OpenAI...")
+    st.info("🧠 Filtering program-level pages using OpenAI...")
 
-    links = st.session_state.crawled_links
     criteria = st.session_state.criteria
     base_url = st.session_state.homepage
-
     valid_programs = []
 
-    with st.spinner("Querying OpenAI to find matching programs..."):
-        for link in links:
+    with st.spinner("Reviewing each page..."):
+        for link in st.session_state.crawled_links:
             try:
                 res = requests.get(link, timeout=10)
                 if res.status_code != 200 or not res.text.strip():
                     continue
 
                 prompt = f"""
-You are a university website analysis agent.
+You are helping a university researcher extract specific program pages.
 
-Please extract the names of individual **Master's or PhD programs** only if the page corresponds to the user's instruction below:
+Only return Master's or PhD programs **that match the user's request**. Ignore general landing pages or unrelated programs.
 
 --- USER REQUEST ---
 {criteria}
 ---------------------
 
-Do not include general pages, only pages that list or describe individual programs. Use only H1, H2, or meaningful headings/titles. Format each result as:
+Only return matching program titles from the HTML content provided.
 
+Return:
 Program Name 1
 Program Name 2
 ...
-                
-Return only valid program names that match the user request, or return "NONE" if the page is irrelevant.
+
+Or return "NONE" if nothing matches.
 """
 
                 response = openai.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You extract academic program names from university pages."},
-                        {"role": "user", "content": prompt + "\n\nPage HTML:\n" + res.text[:7000]},
+                        {"role": "system", "content": "You extract program names from university webpages."},
+                        {"role": "user", "content": prompt + "\n\nHTML Content:\n" + res.text[:6000]},
                     ],
-                    temperature=0.3,
+                    temperature=0.2,
                 )
 
-                result_text = response.choices[0].message.content.strip()
+                text = response.choices[0].message.content.strip()
 
-                if result_text.lower().startswith("none"):
+                if text.lower().startswith("none"):
                     continue
 
-                programs = [line.strip("-• ") for line in result_text.split("\n") if line.strip()]
+                programs = [line.strip("-• ").strip() for line in text.split("\n") if line.strip()]
                 if not programs:
                     continue
 
@@ -163,20 +158,20 @@ Return only valid program names that match the user request, or return "NONE" if
                 continue
 
     if not valid_programs:
-        st.warning("❌ No valid programs found. Try adjusting your criteria.")
+        st.warning("❌ No matching program pages found. Try broadening your criteria.")
     else:
         df = pd.DataFrame(valid_programs)
         st.session_state.final_df = df
         st.session_state.step = 6
         st.rerun()
 
-# Step 6: Final Table Output
+# Step 6: Show and export results
 elif st.session_state.step == 6:
-    df = st.session_state.final_df
     st.success("✅ Final Program Table")
-    st.dataframe(df)
+    df = st.session_state.final_df
+    st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False)
-    st.download_button("📥 Download CSV", csv, "program_table.csv", "text/csv")
+    st.download_button("📥 Download as CSV", csv, "programs_output.csv", "text/csv")
 
     st.balloons()
