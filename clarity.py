@@ -10,6 +10,7 @@ st.write("Enter the base URL for academic programs and a comma-separated list of
 base_url = st.text_input("Enter base URL", value="https://admissions.msu.edu/academics/majors-degrees-programs")
 st.markdown("**Title Tag Flexibility:** Specify a comma-separated list of HTML tags or CSS selectors to locate the program title. For example: `h1,h2,div.program-title`")
 title_tags_input = st.text_input("Title tags to search", value="h1,h2")
+crawl_depth = st.selectbox("Select crawl depth", [1, 2, 3, 4, 5], index=1)
 
 if st.button("Create Spreadsheet"):
     if not base_url:
@@ -17,13 +18,13 @@ if st.button("Create Spreadsheet"):
     else:
         st.write("Crawling the website—this may take a few moments...")
 
-        # Convert the comma-separated string into a list of tags/selectors.
+        # Convert comma-separated title tags into a list.
         title_tags = [tag.strip() for tag in title_tags_input.split(",") if tag.strip()]
 
-        def crawl_website(base_url, max_depth=2):
+        def crawl_website(base_url, max_depth=crawl_depth):
             """
-            Crawl pages under the base URL up to a specified depth while skipping URLs
-            that contain forbidden keywords like 'faculty', 'catalog', or 'directory'.
+            Crawl pages under the base URL up to a given depth while skipping URLs that contain
+            forbidden keywords such as 'faculty', 'catalog', or 'directory'.
             """
             forbidden_keywords = ["faculty", "catalog", "directory"]
             visited = set()
@@ -51,7 +52,7 @@ if st.button("Create Spreadsheet"):
                         st.write(f"Error crawling {url}: {e}")
             return visited
 
-        all_urls = crawl_website(base_url, max_depth=2)
+        all_urls = crawl_website(base_url, max_depth=crawl_depth)
         st.write(f"Found {len(all_urls)} pages. Extracting program information...")
 
         # Extract the last segment of the base URL's path.
@@ -74,12 +75,12 @@ if st.button("Create Spreadsheet"):
                             break
 
                     if program_title:
-                        # Compute the raw URL suffix (the part after the base URL)
+                        # Compute the raw URL suffix (the part after the base URL).
                         raw_suffix = url.replace(base_url, "").lstrip("/")
-                        if raw_suffix:  # If non-empty
+                        if raw_suffix:  # only add pages with a non-empty suffix
                             # Prepend the last segment of the base URL to form column C.
                             col_C = f"{base_last}/{raw_suffix}"
-                            # Use base_last as the directory in the regex pattern.
+                            # For column G, use base_last as the directory.
                             parts = raw_suffix.split("/")
                             program_slug = parts[-1] if parts else ""
                             if "-" in program_slug:
