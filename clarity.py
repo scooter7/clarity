@@ -1,16 +1,12 @@
 import streamlit as st
 import pandas as pd
 import time
-import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-
-# Force webdriver-manager to download ChromeDriver for version 120.
-os.environ["WDM_CHROME_DRIVER_VERSION"] = "120.0.6099.224"
 
 st.title("Dynamic Academic Program Spreadsheet Generator")
 
@@ -33,7 +29,8 @@ if st.button("Create Spreadsheet"):
         # Set the binary location to the installed Chromium binary.
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        service = Service(ChromeDriverManager().install())
+        # Force webdriver-manager to download the matching ChromeDriver by using driver_version.
+        service = Service(ChromeDriverManager(driver_version="120.0.6099.224").install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
         # Convert the comma-separated title tags into a list.
