@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -29,8 +30,9 @@ if st.button("Create Spreadsheet"):
         # Set the binary location to the installed Chromium binary.
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        # Pass the version parameter to the install() method, not the constructor.
-        service = Service(ChromeDriverManager().install(version="120.0.6099.224"))
+        # Set environment variable for the ChromeDriver version.
+        os.environ["WDM_CHROME_DRIVER_VERSION"] = "120.0.6099.224"
+        service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
         # Convert the comma-separated title tags into a list.
