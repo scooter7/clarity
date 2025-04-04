@@ -115,7 +115,7 @@ elif st.session_state.step == 5:
                     f"{html_text[:3000]}..."
                 )
 
-                completion = openai.ChatCompletion.create(
+                completion = openai.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": system_msg},
