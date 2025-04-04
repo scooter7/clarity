@@ -1,15 +1,15 @@
 import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
 
-# Print Streamlit version for debugging purposes.
+# Debug: Display Streamlit version
 st.write("Streamlit version:", st.__version__)
 
-# Fallback function for experimental_rerun
+# Modified safe_rerun using try/except
 def safe_rerun():
-    if hasattr(st, "experimental_rerun"):
+    try:
         st.experimental_rerun()
-    else:
-        st.warning("Please refresh the page manually to proceed.")
+    except Exception as e:
+        st.warning("Please refresh the page manually to proceed. (Rerun failed with error: {})".format(e))
 
 # Set up the app title and description.
 st.title("Web Scraping AI Agent 🕵️‍♂️")
