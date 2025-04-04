@@ -9,6 +9,9 @@ from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 
+# Force webdriver-manager to download ChromeDriver for version 120.
+os.environ["WDM_CHROME_DRIVER_VERSION"] = "120.0.6099.224"
+
 st.title("Dynamic Academic Program Spreadsheet Generator")
 
 st.write("Enter the base URL for academic programs, the HTML tag(s) to search for program titles, and select the maximum crawl depth.")
@@ -30,8 +33,6 @@ if st.button("Create Spreadsheet"):
         # Set the binary location to the installed Chromium binary.
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        # Set environment variable for the ChromeDriver version.
-        os.environ["WDM_CHROME_DRIVER_VERSION"] = "120.0.6099.224"
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
