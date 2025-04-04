@@ -19,7 +19,19 @@ if not openai_api_key:
 openai.api_key = openai_api_key
 
 st.title("🎓 Academic Program Scraper")
-st.caption("Crawls and extracts academic program pages using your filters.")
+st.caption("Find real program pages by crawling university sites intelligently.")
+
+# Allow/Deny filters
+ALLOW_PATTERNS = ["program", "academic", "major", "minor", "undergrad", "graduate", "degree", "school-of"]
+DENY_PATTERNS = ["privacy", "contact", "career", "give", "equity", "library", "news", "event", "login", "policy", "map", "campus-life", "terms", "directory"]
+
+def is_relevant_link(href: str, text: str):
+    href_l = href.lower()
+    text_l = text.lower()
+
+    if any(p in href_l for p in DENY_PATTERNS):
+        return False
+    return any(p in href_l or p in text_l for p in ALLOW_PATTERNS)
 
 # Step manager
 if "step" not in st.session_state:
@@ -49,54 +61,45 @@ elif st.session_state.step == 3:
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Crawl and match links
+# Step 4: Crawl homepage + filter links
 elif st.session_state.step == 4:
-    st.subheader("Step 4: Crawl homepage for matching links")
+    st.subheader("Step 4: Crawl homepage for relevant links")
 
-    if st.button("Crawl and Find Academic Pages"):
+    if st.button("Find Academic Pages"):
         homepage = st.session_state.homepage_url
         try:
             r = requests.get(homepage, timeout=10)
             soup = BeautifulSoup(r.text, "html.parser")
+            base = homepage.rstrip("/")
             found = set()
-            matched = set()
-
-            filters = [f.strip().lower() for f in st.session_state.user_filters.split(",")]
 
             for a in soup.find_all("a", href=True):
                 href = a["href"]
-                text = a.get_text().strip().lower()
-                full = urljoin(homepage, href)
-                parsed = urlparse(full)
+                text = a.get_text().strip()
+                full_url = urljoin(homepage, href)
+                parsed = urlparse(full_url)
 
-                if homepage in full and parsed.scheme.startswith("http"):
-                    found.add(full)
+                if base in full_url and parsed.scheme.startswith("http"):
+                    if is_relevant_link(href, text):
+                        found.add(full_url)
 
-                    if any(f in text or f in href.lower() for f in filters):
-                        matched.add(full)
-
-            # Decide what to show
-            if matched:
-                st.session_state.filtered_links = list(matched)
-                st.success(f"✅ Found {len(matched)} matching links:")
-            else:
-                st.warning("⚠️ No links matched your filters. Showing all links instead.")
+            if found:
                 st.session_state.filtered_links = list(found)
-
-            for url in st.session_state.filtered_links:
-                st.markdown(f"- [{url}]({url})")
-
-            st.session_state.step = 5
-            st.rerun()
-
+                st.success(f"✅ {len(found)} likely academic links found:")
+                for url in st.session_state.filtered_links:
+                    st.markdown(f"- [{url}]({url})")
+                st.session_state.step = 5
+                st.rerun()
+            else:
+                st.warning("⚠️ No academic pages found. Try adjusting the homepage or keywords.")
         except Exception as e:
-            st.error(f"Failed to crawl homepage: {e}")
+            st.error(f"Crawling failed: {e}")
 
-# Step 5: Extract program names using GPT
+# Step 5: GPT analysis
 elif st.session_state.step == 5:
-    st.subheader("Step 5: Use GPT to extract program names")
+    st.subheader("Step 5: Extract program titles with GPT")
 
-    if st.button("Extract Program Names"):
+    if st.button("Extract Programs"):
         output = []
         base_url = st.session_state.homepage_url.rstrip("/")
         filters = st.session_state.user_filters
@@ -104,14 +107,18 @@ elif st.session_state.step == 5:
         for url in st.session_state.filtered_links:
             try:
                 res = requests.get(url, timeout=10)
-                html_text = BeautifulSoup(res.text, "html.parser").prettify()
+                soup = BeautifulSoup(res.text, "html.parser")
+                h1s = soup.find_all("h1")
+                if not h1s or len(soup.get_text()) < 300:
+                    continue
 
-                system_msg = "You are a helpful assistant extracting academic program titles from web pages."
+                html_text = soup.prettify()
+
+                system_msg = "You are a helpful assistant extracting academic program titles from university websites."
                 user_msg = (
-                    f"Here is the HTML of a university page. "
-                    f"The user is interested in: {filters}. "
-                    f"Return only the name(s) of the academic program(s) listed on the page. "
-                    f"Use text from <h1> or similar prominent heading tags if available.\n\n"
+                    f"Here is the HTML content of a page. "
+                    f"The user is interested in programs related to: {filters}. "
+                    f"Extract the program name(s) listed on this page using <h1> or similar heading tags.\n\n"
                     f"{html_text[:3000]}..."
                 )
 
@@ -138,9 +145,9 @@ elif st.session_state.step == 5:
             st.session_state.step = 6
             st.rerun()
         else:
-            st.warning("No programs were extracted.")
+            st.warning("No valid programs extracted. Try with more relevant links.")
 
-# Step 6: Final table
+# Step 6: Display final table
 elif st.session_state.step == 6:
     st.subheader("✅ Final Program Table")
 
