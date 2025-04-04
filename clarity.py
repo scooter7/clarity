@@ -1,10 +1,14 @@
 import streamlit as st
 import pandas as pd
 import time
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 
@@ -21,15 +25,16 @@ if st.button("Create Spreadsheet"):
     else:
         st.write("Crawling the website dynamically. This may take some time...")
 
-        # Set up Selenium Chromium in headless mode using a Service.
+        # Set up Selenium Chromium in headless mode.
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        # Set the binary location to the installed Chromium binary.
+        # Use the installed Chromium binary (adjust path if needed)
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        # Force webdriver-manager to download the matching ChromeDriver by using driver_version.
+        # Force webdriver-manager to use the ChromeDriver version matching your browser.
+        # (Here we use driver_version; ensure your webdriver-manager is up to date)
         service = Service(ChromeDriverManager(driver_version="120.0.6099.224").install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
@@ -38,7 +43,7 @@ if st.button("Create Spreadsheet"):
 
         def crawl_website_dynamic(base_url, max_depth):
             """
-            Crawl pages under the base URL using Selenium (to render JavaScript)
+            Crawl pages under the base URL using Selenium (with explicit waits)
             up to a given depth while skipping URLs with forbidden keywords.
             """
             forbidden_keywords = ["faculty", "catalog", "directory"]
@@ -53,7 +58,16 @@ if st.button("Create Spreadsheet"):
                 visited.add(current_url)
                 try:
                     driver.get(current_url)
-                    time.sleep(2)  # wait for dynamic content to load
+                    # Example explicit wait:
+                    # Wait up to 30 seconds for an element that indicates the dynamic content has loaded.
+                    # Adjust the CSS selector below to one that reliably appears on your target site.
+                    try:
+                        WebDriverWait(driver, 30).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "div.program-list"))
+                        )
+                    except Exception:
+                        st.write(f"Warning: Expected container not found on {current_url}")
+                    time.sleep(2)  # Additional sleep may be helpful
                     html = driver.page_source
                     soup = BeautifulSoup(html, "html.parser")
                     if depth < max_depth:
@@ -70,7 +84,7 @@ if st.button("Create Spreadsheet"):
         all_urls = crawl_website_dynamic(base_url, max_depth)
         st.write(f"Found {len(all_urls)} pages. Extracting program information...")
 
-        # Determine the last element of the base URL's path for use in columns C and G.
+        # Use the last element of the base URL's path for output columns.
         parsed = urlparse(base_url)
         base_path = parsed.path.rstrip("/")
         base_last = base_path.split("/")[-1] if base_path else ""
@@ -79,7 +93,13 @@ if st.button("Create Spreadsheet"):
         for url in all_urls:
             try:
                 driver.get(url)
-                time.sleep(2)  # allow dynamic content to load
+                try:
+                    WebDriverWait(driver, 30).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                except Exception:
+                    st.write(f"Warning: 'body' tag not found on {url}")
+                time.sleep(2)
                 html = driver.page_source
                 soup = BeautifulSoup(html, "html.parser")
                 # Look for a program title using one of the specified tags.
@@ -91,15 +111,12 @@ if st.button("Create Spreadsheet"):
                         break
 
                 if program_title:
-                    # Compute the raw URL suffix (the part after the base URL)
                     raw_suffix = url.replace(base_url, "").lstrip("/")
                     if raw_suffix:
-                        # Prepend the last element from the base URL to form column C.
                         suffix = f"{base_last}/{raw_suffix}"
                         parts = raw_suffix.split("/")
                         if parts:
                             program_slug = parts[-1]
-                            # Create the regex pattern using base_last as the directory.
                             if "-" in program_slug:
                                 suffix_end = program_slug.split("-")[-1]
                                 pattern = f"/{base_last}/.*{suffix_end}"
