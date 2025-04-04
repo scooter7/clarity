@@ -26,6 +26,8 @@ if st.button("Create Spreadsheet"):
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
+        # Set the binary location (adjust if needed—this is common on many Linux systems)
+        chrome_options.binary_location = "/usr/bin/chromium-browser"
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
