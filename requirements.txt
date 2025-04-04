@@ -1,4 +1,5 @@
 streamlit
 scrapegraphai
 openai
-playwright
+beautifulsoup4
+requests
