@@ -3,175 +3,144 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import re
 import openai
 import pandas as pd
 
-# ✅ Get OpenAI API key from Railway environment variable
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# Load OpenAI API Key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-if not openai.api_key:
-    st.error("⚠️ OpenAI API key not found. Set OPENAI_API_KEY as an environment variable on Railway.")
-    st.stop()
+# Setup Streamlit UI
+st.set_page_config(page_title="Academic Program Scraper", layout="wide")
+st.title("🎓 Academic Program Scraper")
+st.caption("Find Masters and PhD programs from specific departments using real-time web crawling.")
 
-# App UI
-st.title("🎯 Academic Program Page Finder")
-st.caption("Find Master’s and PhD programs from specific schools/departments on university websites using GPT-4o.")
-
-# Step state
+# Step tracker
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# Step 1: Institution Name
+# Step 1: Institution name
 if st.session_state.step == 1:
     name = st.text_input("Enter the institution name:")
     if name:
-        st.session_state.institution_name = name
+        st.session_state.institution = name
         st.session_state.step = 2
         st.rerun()
 
 # Step 2: Homepage URL
 elif st.session_state.step == 2:
-    homepage = st.text_input("Enter the homepage URL of the institution:")
+    homepage = st.text_input("Enter the institution’s homepage URL:")
     if homepage:
         st.session_state.homepage = homepage
         st.session_state.step = 3
         st.rerun()
 
-# Step 3: Program Criteria
+# Step 3: Program request details + crawl depth
 elif st.session_state.step == 3:
-    criteria = st.text_area(
-        "What are you looking for?\n\nExample: “I want Master's and PhD programs only from the School of Engineering, School of Medicine, Weatherhead School of Management, and Mandel School of Applied Social Sciences.”"
-    )
+    criteria = st.text_area("Enter your program search request (e.g. Masters and PhD programs in Engineering, Medicine, etc.):")
+    depth = st.selectbox("Crawl depth (max pages to scan):", [50, 100, 200, 300], index=2)
     if criteria:
         st.session_state.criteria = criteria
+        st.session_state.depth = depth
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Crawl site
-elif st.session_state.step == 4:
-    st.info("🔍 Crawling the site...")
+# Step 4: Crawl function
+def get_links(base_url, max_pages=200):
+    visited = set()
+    to_visit = [base_url]
+    found = set()
+    status = st.empty()
+    counter = 0
 
-    def get_links(base_url):
-        visited = set()
-        to_visit = [base_url]
-        found_urls = set()
-
-        while to_visit:
-            url = to_visit.pop()
-            if url in visited or not url.startswith(base_url):
+    while to_visit and counter < max_pages:
+        url = to_visit.pop()
+        if url in visited or not url.startswith(base_url):
+            continue
+        visited.add(url)
+        counter += 1
+        status.markdown(f"🔍 Crawling ({counter})... `{url}`")
+        try:
+            res = requests.get(url, timeout=10)
+            if res.status_code != 200:
                 continue
-            visited.add(url)
+            soup = BeautifulSoup(res.text, "html.parser")
+            for tag in soup.find_all("a", href=True):
+                full = urljoin(url, tag["href"])
+                parsed = urlparse(full)
+                clean = parsed.scheme + "://" + parsed.netloc + parsed.path
+                if clean not in visited and base_url in clean:
+                    found.add(clean)
+                    to_visit.append(clean)
+        except:
+            continue
+    status.markdown(f"✅ Done crawling. Found {len(found)} pages.")
+    return list(found)
 
-            try:
-                res = requests.get(url, timeout=10)
-                if res.status_code != 200:
-                    continue
-                soup = BeautifulSoup(res.text, "html.parser")
-                for a in soup.find_all("a", href=True):
-                    full_url = urljoin(url, a["href"])
-                    parsed = urlparse(full_url)
-                    cleaned_url = parsed.scheme + "://" + parsed.netloc + parsed.path
-                    if cleaned_url not in visited and base_url in cleaned_url:
-                        found_urls.add(cleaned_url)
-                        to_visit.append(cleaned_url)
-            except Exception:
-                continue
+# Step 4: Run the crawl
+if st.session_state.step == 4:
+    st.subheader("🔍 Crawling site for program pages...")
+    with st.spinner("Scanning website..."):
+        links = get_links(st.session_state.homepage, max_pages=st.session_state.depth)
+    if links:
+        st.session_state.links = links
+        st.session_state.step = 5
+        st.rerun()
+    else:
+        st.error("No links found. Check your homepage URL.")
 
-        return list(found_urls)
-
-    with st.spinner("Finding all internal URLs..."):
-        links = get_links(st.session_state.homepage)
-
-    st.success(f"🔗 Found {len(links)} URLs")
-    st.session_state.crawled_links = links
-    st.session_state.step = 5
-    st.rerun()
-
-# Step 5: Use GPT to filter program pages
+# Step 5: Process each link with OpenAI
 elif st.session_state.step == 5:
-    st.info("🧠 Filtering program-level pages using OpenAI...")
+    st.subheader("🎯 Filtering and extracting program information...")
+    with st.spinner("Processing links..."):
 
-    criteria = st.session_state.criteria
-    base_url = st.session_state.homepage
-    valid_programs = []
-
-    with st.spinner("Reviewing each page..."):
-        for link in st.session_state.crawled_links:
+        results = []
+        for link in st.session_state.links:
             try:
                 res = requests.get(link, timeout=10)
-                if res.status_code != 200 or not res.text.strip():
+                if res.status_code != 200:
                     continue
+                content = res.text[:3000]
 
-                prompt = f"""
-You are helping a university researcher extract specific program pages.
+                system_prompt = (
+                    "You are a helpful assistant that finds academic programs in web content. "
+                    "Your job is to determine if this HTML content describes an academic program that matches the user's request. "
+                    "Only include exact program names, each on its own line."
+                )
 
-Only return Master's or PhD programs **that match the user's request**. Ignore general landing pages or unrelated programs.
+                user_prompt = f"""User's request:
+{st.session_state.criteria}
 
---- USER REQUEST ---
-{criteria}
----------------------
+HTML content:
+{content}
 
-Only return matching program titles from the HTML content provided.
-
-Return:
-Program Name 1
-Program Name 2
-...
-
-Or return "NONE" if nothing matches.
+Return the list of matching program names, one per line. If none found, return "None".
 """
 
                 response = openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You extract program names from university webpages."},
-                        {"role": "user", "content": prompt + "\n\nHTML Content:\n" + res.text[:6000]},
-                    ],
-                    temperature=0.2,
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ]
                 )
 
-                text = response.choices[0].message.content.strip()
+                answer = response.choices[0].message.content.strip()
 
-                if text.lower().startswith("none"):
-                    continue
-
-                programs = [line.strip("-• ").strip() for line in text.split("\n") if line.strip()]
-                if not programs:
-                    continue
-
-                rel_path = re.sub(r'^https?://[^/]+', '', link)
-                pattern = '/' + '/'.join(rel_path.strip('/').split('/')[:-1]) + '/.*'
-
-                for prog in programs:
-                    valid_programs.append({
-                        "Program": prog,
-                        "Full URL": link,
-                        "Relative Path": rel_path,
-                        "Col D": "",
-                        "Col E": "",
-                        "Col F": "",
-                        "Pattern": pattern
-                    })
-
+                if answer.lower() != "none":
+                    for line in answer.split("\n"):
+                        program = line.strip("•-– \t")
+                        if program:
+                            relative = link.replace(st.session_state.homepage, "").lstrip("/")
+                            pattern = "/" + "/".join(relative.split("/")[:-1]) + "/.*"
+                            results.append([program, link, relative, "", "", "", pattern])
             except Exception:
                 continue
 
-    if not valid_programs:
-        st.warning("❌ No matching program pages found. Try broadening your criteria.")
-    else:
-        df = pd.DataFrame(valid_programs)
-        st.session_state.final_df = df
-        st.session_state.step = 6
-        st.rerun()
-
-# Step 6: Show and export results
-elif st.session_state.step == 6:
-    st.success("✅ Final Program Table")
-    df = st.session_state.final_df
-    st.dataframe(df, use_container_width=True)
-
-    csv = df.to_csv(index=False)
-    st.download_button("📥 Download as CSV", csv, "programs_output.csv", "text/csv")
-
-    st.balloons()
+        if results:
+            df = pd.DataFrame(results, columns=["Program", "Full URL", "Relative Path", "Col D", "Col E", "Col F", "Pattern"])
+            st.success("✅ Final Program Table")
+            st.dataframe(df, use_container_width=True)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download CSV", csv, "programs.csv", "text/csv")
+        else:
+            st.warning("No matching programs were found. Try broadening your request.")
