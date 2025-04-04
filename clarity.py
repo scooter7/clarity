@@ -21,15 +21,16 @@ if st.button("Create Spreadsheet"):
     else:
         st.write("Crawling the website dynamically. This may take some time...")
 
-        # Set up Selenium Chrome (Chromium) in headless mode using a Service.
+        # Set up Selenium Chromium in headless mode using a Service.
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        # Set the binary location to the correct path on Streamlit Cloud.
+        # Set the binary location to the installed Chromium binary.
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        service = Service(ChromeDriverManager().install())
+        # Explicitly request the matching driver version (update version string if necessary)
+        service = Service(ChromeDriverManager(version="120.0.6099.224").install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
         # Convert the comma-separated title tags into a list.
