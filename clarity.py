@@ -21,13 +21,14 @@ if st.button("Create Spreadsheet"):
     else:
         st.write("Crawling the website dynamically. This may take some time...")
 
-        # Set up Selenium Chrome in headless mode using Service.
+        # Set up Selenium Chrome in headless mode using a Service.
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        # Set the binary location (adjust if needed—this is common on many Linux systems)
-        chrome_options.binary_location = "/usr/bin/chromium-browser"
+        # Specify the binary location.
+        chrome_options.binary_location = "/usr/bin/chromium-browser"  # adjust if needed
+
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
