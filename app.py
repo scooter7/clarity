@@ -28,10 +28,18 @@ DENY_PATTERNS = ["privacy", "contact", "career", "give", "equity", "library", "n
 def is_relevant_link(href: str, text: str):
     href_l = href.lower()
     text_l = text.lower()
-
     if any(p in href_l for p in DENY_PATTERNS):
         return False
     return any(p in href_l or p in text_l for p in ALLOW_PATTERNS)
+
+def extract_programs_from_html(soup):
+    headings = soup.find_all(['h1', 'h2', 'h3'])
+    programs = []
+    for h in headings:
+        text = h.get_text(strip=True)
+        if any(k in text.lower() for k in ["master", "phd", "bachelor", "mba", "engineering", "science", "arts", "social work"]):
+            programs.append(text)
+    return programs
 
 # Step manager
 if "step" not in st.session_state:
@@ -95,9 +103,9 @@ elif st.session_state.step == 4:
         except Exception as e:
             st.error(f"Crawling failed: {e}")
 
-# Step 5: GPT analysis
+# Step 5: Parse + GPT fallback
 elif st.session_state.step == 5:
-    st.subheader("Step 5: Extract program titles with GPT")
+    st.subheader("Step 5: Extract Programs")
 
     if st.button("Extract Programs"):
         output = []
@@ -108,34 +116,38 @@ elif st.session_state.step == 5:
             try:
                 res = requests.get(url, timeout=10)
                 soup = BeautifulSoup(res.text, "html.parser")
-                h1s = soup.find_all("h1")
-                if not h1s or len(soup.get_text()) < 300:
-                    continue
-
-                html_text = soup.prettify()
-
-                system_msg = "You are a helpful assistant extracting academic program titles from university websites."
-                user_msg = (
-                    f"Here is the HTML content of a page. "
-                    f"The user is interested in programs related to: {filters}. "
-                    f"Extract the program name(s) listed on this page using <h1> or similar heading tags.\n\n"
-                    f"{html_text[:3000]}..."
-                )
-
-                completion = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": user_msg}
-                    ],
-                    temperature=0.2
-                )
-
-                result = completion.choices[0].message.content.strip()
+                page_text = soup.get_text()
                 relative_path = url.replace(base_url, "").lstrip("/")
                 pattern = "/" + re.sub(r"-[^/]+$", "/.*", relative_path)
 
-                output.append((result, url, relative_path, "", "", "", pattern))
+                # Try HTML parsing first
+                parsed_programs = extract_programs_from_html(soup)
+
+                if parsed_programs:
+                    joined_programs = ", ".join(parsed_programs)
+                elif len(page_text) > 300:
+                    html_text = soup.prettify()
+                    system_msg = "You are a helpful assistant extracting academic program titles from university websites."
+                    user_msg = (
+                        f"Here is the HTML content of a page. "
+                        f"The user is interested in programs related to: {filters}. "
+                        f"Extract the program name(s) listed on this page using headings or structured tags.\n\n"
+                        f"{html_text[:3000]}..."
+                    )
+
+                    completion = openai.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": user_msg}
+                        ],
+                        temperature=0.3
+                    )
+                    joined_programs = completion.choices[0].message.content.strip()
+                else:
+                    continue
+
+                output.append((joined_programs, url, relative_path, "", "", "", pattern))
 
             except Exception as e:
                 st.warning(f"⚠️ Skipped {url}: {e}")
