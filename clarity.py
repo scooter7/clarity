@@ -29,8 +29,8 @@ if st.button("Create Spreadsheet"):
         # Set the binary location to the installed Chromium binary.
         chrome_options.binary_location = "/usr/bin/chromium"
 
-        # Explicitly request the matching driver version (update version string if necessary)
-        service = Service(ChromeDriverManager(version="120.0.6099.224").install())
+        # Pass the version parameter to the install() method, not the constructor.
+        service = Service(ChromeDriverManager().install(version="120.0.6099.224"))
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
         # Convert the comma-separated title tags into a list.
