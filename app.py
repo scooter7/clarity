@@ -57,8 +57,11 @@ elif st.session_state.step == 4:
     
     if st.button("List URLs"):
         prompt = (
-            f"Scrape {st.session_state.homepage_url} for program pages related to: "
-            f"{st.session_state.program_info}. Return valid academic program URLs (no 404s)."
+            f"You are a web-scraping agent. Scrape {st.session_state.homepage_url} "
+            f"and return a list of direct URLs to individual academic **program pages** "
+            f"(e.g. https://xyz.edu/academics/accounting-bs), not general pages. "
+            f"Only return valid, direct links to **undergraduate, graduate, or PhD** program pages. "
+            f"Do not include general pages or descriptions. Return one URL per line."
         )
         scraper = SmartScraperGraph(
             prompt=prompt,
