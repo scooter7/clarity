@@ -1,115 +1,130 @@
 import streamlit as st
-import pandas as pd
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from scrapegraphai.graphs import SmartScraperGraph
 
-st.title("Academic Program Spreadsheet Generator")
+# Set up the Streamlit app title and description.
+st.title("Web Scraping AI Agent 🕵️‍♂️")
+st.caption("Scrape institution websites using GPT-4o-mini on Streamlit Cloud.")
 
-st.write("Enter the base URL for academic programs and a comma-separated list of title tags (or CSS selectors).")
-base_url = st.text_input("Enter base URL", value="https://admissions.msu.edu/academics/majors-degrees-programs")
-st.markdown("**Title Tag Flexibility:** Specify a comma-separated list of HTML tags or CSS selectors to locate the program title. For example: `h1,h2,div.program-title`")
-title_tags_input = st.text_input("Title tags to search", value="h1,h2")
-crawl_depth = st.selectbox("Select crawl depth", [1, 2, 3, 4, 5], index=1)
+# Retrieve OpenAI API key from Streamlit secrets.
+# Ensure your secrets.toml file has an entry like:
+# [openai]
+# api_key = "your_openai_api_key"
+openai_api_key = st.secrets["openai"]["api_key"]
 
-if st.button("Create Spreadsheet"):
-    if not base_url:
-        st.error("Please enter a valid base URL.")
-    else:
-        st.write("Crawling the website—this may take a few moments...")
+# Define configuration to use GPT-4o-mini.
+graph_config = {
+    "llm": {
+        "api_key": openai_api_key,
+        "model": "gpt-4o-mini",
+    },
+}
 
-        # Convert comma-separated title tags into a list.
-        title_tags = [tag.strip() for tag in title_tags_input.split(",") if tag.strip()]
+# Initialize session state to manage multi-step user input.
+if "step" not in st.session_state:
+    st.session_state.step = 1
 
-        def crawl_website(base_url, max_depth=crawl_depth):
-            """
-            Crawl pages under the base URL up to a given depth while skipping URLs that contain
-            forbidden keywords such as 'faculty', 'catalog', or 'directory'.
-            """
-            forbidden_keywords = ["faculty", "catalog", "directory"]
-            visited = set()
-            to_crawl = [(base_url, 0)]
-            while to_crawl:
-                url, depth = to_crawl.pop(0)
-                if any(keyword in url.lower() for keyword in forbidden_keywords):
-                    continue
-                if url in visited:
-                    continue
-                visited.add(url)
-                if depth < max_depth:
-                    try:
-                        response = requests.get(url, timeout=10)
-                        if response.status_code == 200:
-                            soup = BeautifulSoup(response.text, "html.parser")
-                            for a in soup.find_all("a", href=True):
-                                href = a["href"]
-                                full_url = urljoin(base_url, href)
-                                # Only follow links that start with the base URL and do not contain forbidden keywords.
-                                if full_url.startswith(base_url) and full_url not in visited:
-                                    if not any(keyword in full_url.lower() for keyword in forbidden_keywords):
-                                        to_crawl.append((full_url, depth + 1))
-                    except Exception as e:
-                        st.write(f"Error crawling {url}: {e}")
-            return visited
+# Step 1: Ask for the institution name.
+if st.session_state.step == 1:
+    institution_name = st.text_input("Enter the Institution Name:")
+    if institution_name:
+        st.session_state.institution_name = institution_name
+        st.session_state.step = 2
+        st.experimental_rerun()
 
-        all_urls = crawl_website(base_url, max_depth=crawl_depth)
-        st.write(f"Found {len(all_urls)} pages. Extracting program information...")
+# Step 2: Ask for the institution's homepage URL.
+elif st.session_state.step == 2:
+    homepage_url = st.text_input("Enter the Institution's Homepage URL:")
+    if homepage_url:
+        st.session_state.homepage_url = homepage_url
+        st.session_state.step = 3
+        st.experimental_rerun()
 
-        # Extract the last segment of the base URL's path.
-        parsed = urlparse(base_url)
-        base_path = parsed.path.rstrip("/")
-        base_last = base_path.split("/")[-1] if base_path else ""
+# Step 3: Ask for details about programs, program levels, and departments.
+elif st.session_state.step == 3:
+    program_info = st.text_area(
+        "Enter the details about the programs you want scraped. " +
+        "Include program names, desired levels (Undergraduate, Master's, PhD), " +
+        "and specific schools/colleges/departments (e.g., College of Education):"
+    )
+    if program_info:
+        st.session_state.program_info = program_info
+        st.session_state.step = 4
+        st.experimental_rerun()
 
-        results = []
-        for url in all_urls:
-            try:
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, "html.parser")
-                    # Try each provided tag until a valid title is found.
-                    program_title = None
-                    for tag in title_tags:
-                        candidate = soup.select_one(tag)
-                        if candidate and candidate.get_text(strip=True):
-                            program_title = candidate.get_text(strip=True)
-                            break
-
-                    if program_title:
-                        # Compute the raw URL suffix (the part after the base URL).
-                        raw_suffix = url.replace(base_url, "").lstrip("/")
-                        if raw_suffix:  # only add pages with a non-empty suffix
-                            # Prepend the last segment of the base URL to form column C.
-                            col_C = f"{base_last}/{raw_suffix}"
-                            # For column G, use base_last as the directory.
-                            parts = raw_suffix.split("/")
-                            program_slug = parts[-1] if parts else ""
-                            if "-" in program_slug:
-                                suffix_end = program_slug.split("-")[-1]
-                                pattern = f"/{base_last}/.*{suffix_end}"
-                            else:
-                                pattern = f"/{base_last}/.*"
-                            results.append({
-                                "A": program_title,
-                                "B": url,
-                                "C": col_C,
-                                "D": "",
-                                "E": "",
-                                "F": "",
-                                "G": pattern
-                            })
-            except Exception as e:
-                st.write(f"Error processing {url}: {e}")
-
-        if results:
-            df = pd.DataFrame(results)
-            st.write("Spreadsheet created. Here is a preview:")
-            st.dataframe(df)
-            csv_data = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download CSV",
-                data=csv_data,
-                file_name="academic_programs.csv",
-                mime="text/csv"
-            )
+# Step 4: List all discovered URLs for manual validation.
+elif st.session_state.step == 4:
+    st.subheader("Step 4: Validate Discovered URLs")
+    st.write(
+        "The app will now scrape the homepage for pages related to your input. " +
+        "Below is a list of URLs that the scraper found. Please click each link to test " +
+        "that they are valid and do not lead to 404 errors. When you are satisfied with " +
+        "the results, click the 'Create Tabular Output' button."
+    )
+    # Build a prompt for the scraper to list valid URLs.
+    prompt = (
+        f"Scrape the website for '{st.session_state.institution_name}' with homepage {st.session_state.homepage_url} "
+        f"to find pages related to the following criteria: {st.session_state.program_info}. "
+        "Return a list of valid URLs that do not lead to 404 errors."
+    )
+    smart_scraper_graph = SmartScraperGraph(
+        prompt=prompt,
+        source=st.session_state.homepage_url,
+        config=graph_config
+    )
+    
+    if st.button("List URLs"):
+        result = smart_scraper_graph.run()
+        # Assuming result is a string containing URLs (one per line) or a list.
+        urls = []
+        if isinstance(result, list):
+            urls = result
+        elif isinstance(result, str):
+            urls = [line.strip() for line in result.splitlines() if line.strip()]
+        
+        if urls:
+            st.write("Discovered URLs:")
+            for url in urls:
+                st.markdown(f"[{url}]({url})")
+            st.session_state.urls = urls
+            # Move to the next step once URLs are listed.
+            st.session_state.step = 5
         else:
-            st.write("No academic program pages were found with the specified criteria.")
+            st.error("No URLs found. Please check your inputs or try again.")
+
+# Step 5: Create the tabular output based on validated URLs.
+elif st.session_state.step == 5:
+    st.subheader("Step 5: Create Tabular Output")
+    st.write(
+        "Once you have validated the above links, click the button below to generate the table. " +
+        "The table will have the following columns:\n\n"
+        "- **Column A:** Program name (as identified from an h1 or similar tag on the page)\n"
+        "- **Column B:** The corresponding valid URL of the academic program page\n"
+        "- **Column C:** The URL elements after the base URL (e.g., for 'https://www.example.edu/academics/majors/accounting', output 'academics/majors/accounting')\n"
+        "- **Columns D, E, F:** (Leave these blank)\n"
+        "- **Column G:** A regex pattern for Column C (e.g., '/academics/majors/.*accounting')"
+    )
+    
+    if st.button("Create Tabular Output"):
+        prompt_table = (
+            f"Using the institution homepage {st.session_state.homepage_url} and the validated program pages, "
+            "create a table with the following columns:\n\n"
+            "A: Program name (extracted from an h1 tag or similar element on the page).\n"
+            "B: The corresponding program page URL (ensure the URL is valid and does not return a 404 error).\n"
+            "C: The part of the URL after the base URL (for example, for 'https://www.example.edu/academics/majors/accounting', output 'academics/majors/accounting').\n"
+            "D, E, F: Leave blank.\n"
+            "G: A regex pattern representing the structure of Column C (for example, for 'academics/majors/accounting', output '/academics/majors/.*accounting').\n\n"
+            "Return the table in Markdown format."
+        )
+        smart_scraper_graph_table = SmartScraperGraph(
+            prompt=prompt_table,
+            source=st.session_state.homepage_url,
+            config=graph_config
+        )
+        table_result = smart_scraper_graph_table.run()
+        st.write("### Tabular Output")
+        st.markdown(table_result)
+        st.session_state.step = 6
+
+# Final step: Completion message.
+elif st.session_state.step == 6:
+    st.success("Scraping and table creation complete.")
