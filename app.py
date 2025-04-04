@@ -2,14 +2,14 @@ import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
 import os
 
-# ✅ Securely get OpenAI API key from secrets.toml or Railway environment variable
+# ✅ Securely get OpenAI API key from secrets.toml (for local dev) or env variable (for Railway)
 try:
     openai_api_key = st.secrets["openai"]["api_key"]
 except Exception:
     openai_api_key = os.getenv("OPENAI_API_KEY")
 
 if not openai_api_key:
-    st.error("⚠️ OpenAI API key not found. Please set it in Railway as an environment variable.")
+    st.error("⚠️ OpenAI API key not found. Please set it as an environment variable on Railway.")
     st.stop()
 
 # ✅ Streamlit UI
@@ -69,7 +69,9 @@ elif st.session_state.step == 4:
         )
         try:
             result = scraper.run()
-            urls = [line.strip() for line in result.splitlines() if line.strip()]
+            answer_text = result["answer"] if isinstance(result, dict) and "answer" in result else str(result)
+            urls = [line.strip() for line in answer_text.splitlines() if line.strip()]
+
             if urls:
                 st.session_state.urls = urls
                 st.success("✅ Test these URLs before proceeding:")
@@ -102,9 +104,10 @@ elif st.session_state.step == 5:
             config=graph_config
         )
         try:
-            output = scraper.run()
+            result = scraper.run()
+            answer_text = result["answer"] if isinstance(result, dict) and "answer" in result else str(result)
             st.markdown("### Tabular Output")
-            st.markdown(output)
+            st.markdown(answer_text)
             st.session_state.step = 6
             st.rerun()
         except Exception as e:
