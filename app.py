@@ -1,6 +1,9 @@
 import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
 import os
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
 import re
 
 # ✅ Secure OpenAI API key
@@ -14,7 +17,7 @@ if not openai_api_key:
     st.stop()
 
 st.title("Web Scraping AI Agent 🕵️‍♂️")
-st.caption("Scrape academic program info from institution websites using GPT-4o-mini.")
+st.caption("Crawls institution websites like a human and extracts academic programs using GPT-4o-mini.")
 
 graph_config = {
     "llm": {
@@ -36,99 +39,98 @@ if st.session_state.step == 1:
 
 # Step 2: Homepage URL
 elif st.session_state.step == 2:
-    homepage = st.text_input("Enter the institution’s homepage URL:")
+    homepage = st.text_input("Enter the institution’s homepage URL (include https://):")
     if homepage:
         st.session_state.homepage_url = homepage
         st.session_state.step = 3
         st.rerun()
 
-# Step 3: Programs, levels, departments
+# Step 3: Program targets
 elif st.session_state.step == 3:
-    info = st.text_area("Enter program names, levels (UG, MS, PhD), and departments (e.g. College of Business):")
+    info = st.text_area("Enter programs, levels (UG, MS, PhD), and departments (e.g., College of Business):")
     if info:
         st.session_state.program_info = info
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Scrape for links
+# Step 4: Crawl + Filter URLs
 elif st.session_state.step == 4:
-    st.subheader("Validate URLs")
-    st.write("Click below to list discovered academic program URLs. Then manually test to ensure none are 404s.")
-    
-    if st.button("List URLs"):
-        prompt = (
-            f"You are a web-scraping agent. Scrape {st.session_state.homepage_url} "
-            f"and return a list of direct URLs to individual academic **program pages** "
-            f"(e.g. https://xyz.edu/academics/accounting-bs), not general pages. "
-            f"Only return valid, direct links to **undergraduate, graduate, or PhD** program pages. "
-            f"Do not include general pages or descriptions. Return one URL per line."
-        )
-        scraper = SmartScraperGraph(
-            prompt=prompt,
-            source=st.session_state.homepage_url,
-            config=graph_config
-        )
+    st.subheader("Step 4: Crawl Website for Academic Pages")
 
+    if st.button("Crawl Homepage"):
+        base_url = st.session_state.homepage_url
         try:
-            result = scraper.run()
-            answer_text = result.get("answer", "") if isinstance(result, dict) else str(result)
+            response = requests.get(base_url, timeout=10)
+            soup = BeautifulSoup(response.text, "html.parser")
+            links = set()
 
-            st.markdown("### 🔍 Raw Output from Scraper")
-            st.code(answer_text)
+            for a_tag in soup.find_all("a", href=True):
+                href = a_tag["href"]
+                full_url = urljoin(base_url, href)
+                parsed = urlparse(full_url)
+                if base_url in full_url and not parsed.fragment and parsed.scheme.startswith("http"):
+                    links.add(full_url)
 
-            # Extract all valid-looking URLs
-            urls = re.findall(r'https?://[^\s\)\]]+', answer_text)
+            # Filter URLs likely to contain academic programs
+            academic_links = [url for url in links if re.search(r"(program|major|minors|academics|degree)", url, re.IGNORECASE)]
 
-            if urls:
-                st.session_state.urls = urls
-                st.success("✅ Test these URLs before proceeding:")
-                for url in urls:
+            st.session_state.academic_links = list(academic_links)
+            if academic_links:
+                st.success(f"Found {len(academic_links)} academic-looking URLs:")
+                for url in academic_links:
                     st.markdown(f"- [{url}]({url})")
                 st.session_state.step = 5
                 st.rerun()
             else:
-                st.warning("No URLs matched. Check the raw output above.")
+                st.warning("No academic-related URLs found. Try a broader homepage.")
         except Exception as e:
-            st.error(f"Scraping failed: {e}")
+            st.error(f"Failed to crawl homepage: {e}")
 
-# Step 5: Generate table
+# Step 5: Extract Program Names with GPT
 elif st.session_state.step == 5:
-    st.subheader("Generate Tabular Output")
-    st.write("Creates a table with program names, URLs, and structured patterns.")
+    st.subheader("Step 5: Extract Program Titles")
 
-    if st.button("Create Tabular Output"):
-        prompt = (
-            f"From {st.session_state.homepage_url}, return a Markdown table with:\n"
-            f"Column A: Program name (h1 tag or similar)\n"
-            f"Column B: Full valid URL\n"
-            f"Column C: Relative path after base URL\n"
-            f"Columns D–F: Leave blank\n"
-            f"Column G: Pattern based on C (e.g., /majors/.*bs)"
-        )
-        scraper = SmartScraperGraph(
-            prompt=prompt,
-            source=st.session_state.homepage_url,
-            config=graph_config
-        )
+    if st.button("Run GPT Extraction"):
+        programs = []
+        for url in st.session_state.academic_links:
+            prompt = (
+                f"You are analyzing a university website. Extract the academic program name from this page. "
+                f"Only return the text of the main academic program title (usually in an h1 or strong heading). "
+                f"If multiple programs appear, return a list. URL: {url}"
+            )
 
-        try:
-            result = scraper.run()
-            answer_text = result.get("answer", "") if isinstance(result, dict) else str(result)
+            try:
+                scraper = SmartScraperGraph(prompt=prompt, source=url, config=graph_config)
+                result = scraper.run()
+                answer_text = result.get("answer", "") if isinstance(result, dict) else str(result)
 
-            st.markdown("### 📋 Raw Tabular Output")
-            st.code(answer_text)
+                # Parse results
+                for line in answer_text.splitlines():
+                    line = line.strip()
+                    if line:
+                        programs.append((line, url))
+            except Exception as e:
+                st.warning(f"Skipping {url}: {e}")
 
-            if "|" in answer_text and "---" in answer_text:
-                st.markdown("### ✅ Parsed Markdown Table")
-                st.markdown(answer_text)
-                st.session_state.step = 6
-                st.rerun()
-            else:
-                st.warning("No valid Markdown table format detected. Check the output above.")
-        except Exception as e:
-            st.error(f"Tabular output failed: {e}")
+        if programs:
+            st.session_state.programs = programs
+            st.session_state.step = 6
+            st.rerun()
+        else:
+            st.warning("No programs were extracted. Try checking links manually.")
 
-# Step 6: Done
+# Step 6: Show Table
 elif st.session_state.step == 6:
-    st.success("✅ Scraping and table complete!")
+    st.subheader("Final Output Table")
+
+    if "programs" in st.session_state:
+        base_url = st.session_state.homepage_url.rstrip("/")
+        st.markdown("| Program | Full URL | Relative Path | Col D | Col E | Col F | Pattern |")
+        st.markdown("|--------|----------|---------------|--------|--------|--------|---------|")
+        for name, full_url in st.session_state.programs:
+            relative = full_url.replace(base_url, "").lstrip("/")
+            pattern = "/" + re.sub(r"-[^/]+$", "/.*", relative)
+            st.markdown(f"| {name} | {full_url} | {relative} |  |  |  | {pattern} |")
+
+    st.success("✅ Complete!")
     st.balloons()
