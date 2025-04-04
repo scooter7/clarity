@@ -2,14 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 st.title("Academic Program Spreadsheet Generator")
 
 st.write("Enter the base URL for academic programs and a comma-separated list of title tags (or CSS selectors).")
 base_url = st.text_input("Enter base URL", value="https://www.ithaca.edu/academics")
-
 st.markdown("**Title Tag Flexibility:** Specify a comma-separated list of HTML tags or CSS selectors to locate the program title. For example: `h1,h2,div.program-title`")
 title_tags_input = st.text_input("Title tags to search", value="h1,h2")
 
@@ -56,13 +54,18 @@ if st.button("Create Spreadsheet"):
         all_urls = crawl_website(base_url, max_depth=2)
         st.write(f"Found {len(all_urls)} pages. Extracting program information...")
 
+        # Extract the last segment of the base URL's path.
+        parsed = urlparse(base_url)
+        base_path = parsed.path.rstrip("/")
+        base_last = base_path.split("/")[-1] if base_path else ""
+
         results = []
         for url in all_urls:
             try:
                 response = requests.get(url, timeout=10)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, "html.parser")
-                    # Try each provided tag until a valid title is found
+                    # Try each provided tag until a valid title is found.
                     program_title = None
                     for tag in title_tags:
                         candidate = soup.select_one(tag)
@@ -71,23 +74,23 @@ if st.button("Create Spreadsheet"):
                             break
 
                     if program_title:
-                        # Compute the URL suffix (the part after the base URL)
-                        suffix = url.replace(base_url, "").lstrip("/")
-                        if suffix:  # Ensure suffix is non-empty
-                            parts = suffix.split("/")
-                            directory = parts[0] if parts else ""
-                            # If the last part has a hyphen, try to extract a specific ending
+                        # Compute the raw URL suffix (the part after the base URL).
+                        raw_suffix = url.replace(base_url, "").lstrip("/")
+                        if raw_suffix:
+                            # Prepend the last element of the base URL to form column C.
+                            col_C = f"{base_last}/{raw_suffix}"
+                            # For regex pattern, use base_last as the directory.
+                            parts = raw_suffix.split("/")
                             program_slug = parts[-1] if parts else ""
                             if "-" in program_slug:
                                 suffix_end = program_slug.split("-")[-1]
-                                pattern = f"/{directory}/.*{suffix_end}"
+                                pattern = f"/{base_last}/.*{suffix_end}"
                             else:
-                                pattern = f"/{directory}/.*"
-                            
+                                pattern = f"/{base_last}/.*"
                             results.append({
                                 "A": program_title,
                                 "B": url,
-                                "C": suffix,
+                                "C": col_C,
                                 "D": "",
                                 "E": "",
                                 "F": "",
