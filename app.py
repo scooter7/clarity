@@ -2,21 +2,21 @@ import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
 import os
 
-# Securely get the OpenAI API key
-openai_api_key = (
-    st.secrets["openai"]["api_key"]
-    if "openai" in st.secrets and "api_key" in st.secrets["openai"]
-    else os.getenv("OPENAI_API_KEY")
-)
+# ✅ Securely get OpenAI API key from secrets.toml or Railway environment variable
+try:
+    openai_api_key = st.secrets["openai"]["api_key"]
+except Exception:
+    openai_api_key = os.getenv("OPENAI_API_KEY")
 
 if not openai_api_key:
-    st.error("⚠️ OpenAI API key not found. Please add it to secrets.toml or set the OPENAI_API_KEY environment variable.")
+    st.error("⚠️ OpenAI API key not found. Please set it in Railway as an environment variable.")
     st.stop()
 
-# Setup Streamlit UI
+# ✅ Streamlit UI
 st.title("Web Scraping AI Agent 🕵️‍♂️")
-st.caption("Scrape institution websites using GPT-4o-mini.")
+st.caption("Scrape academic program info from institution websites using GPT-4o-mini.")
 
+# ✅ ScrapeGraphAI config
 graph_config = {
     "llm": {
         "api_key": openai_api_key,
@@ -24,11 +24,11 @@ graph_config = {
     },
 }
 
-# Step management
+# ✅ Step tracking
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# Step 1: Institution Name
+# ✅ Step 1: Institution Name
 if st.session_state.step == 1:
     name = st.text_input("Enter the institution name:")
     if name:
@@ -36,7 +36,7 @@ if st.session_state.step == 1:
         st.session_state.step = 2
         st.rerun()
 
-# Step 2: Institution Homepage URL
+# ✅ Step 2: Institution Homepage URL
 elif st.session_state.step == 2:
     homepage = st.text_input("Enter the institution’s homepage URL:")
     if homepage:
@@ -44,7 +44,7 @@ elif st.session_state.step == 2:
         st.session_state.step = 3
         st.rerun()
 
-# Step 3: Desired Programs Info
+# ✅ Step 3: Desired Programs
 elif st.session_state.step == 3:
     info = st.text_area("Enter program names, levels (UG, MS, PhD), and departments (e.g. College of Business):")
     if info:
@@ -52,7 +52,7 @@ elif st.session_state.step == 3:
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Scrape for Links
+# ✅ Step 4: Scrape for Links
 elif st.session_state.step == 4:
     st.subheader("Validate URLs")
     st.write("Click below to list discovered academic program URLs. Then manually test to ensure none are 404s.")
@@ -82,7 +82,7 @@ elif st.session_state.step == 4:
         except Exception as e:
             st.error(f"Scraping failed: {e}")
 
-# Step 5: Generate Tabular Output
+# ✅ Step 5: Generate Tabular Output
 elif st.session_state.step == 5:
     st.subheader("Generate Tabular Output")
     st.write("Creates a table with program names, URLs, and structured patterns.")
@@ -110,7 +110,7 @@ elif st.session_state.step == 5:
         except Exception as e:
             st.error(f"Tabular output failed: {e}")
 
-# Step 6: Done
+# ✅ Step 6: Done
 elif st.session_state.step == 6:
     st.success("✅ Scraping and table complete!")
     st.balloons()
