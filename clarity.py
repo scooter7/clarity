@@ -1,26 +1,22 @@
 import streamlit as st
 from scrapegraphai.graphs import SmartScraperGraph
+import os
 
-# Debug: Display Streamlit version
-st.write("Streamlit version:", st.__version__)
+# Securely get the OpenAI API key
+openai_api_key = (
+    st.secrets["openai"]["api_key"]
+    if "openai" in st.secrets and "api_key" in st.secrets["openai"]
+    else os.getenv("OPENAI_API_KEY")
+)
 
-# Safe rerun for compatibility with different Streamlit versions
-def safe_rerun():
-    if hasattr(st, "rerun"):
-        st.rerun()
-    elif hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
-    else:
-        st.warning("Please refresh the page manually to proceed.")
+if not openai_api_key:
+    st.error("⚠️ OpenAI API key not found. Please add it to secrets.toml or set the OPENAI_API_KEY environment variable.")
+    st.stop()
 
-# Title and intro
+# Setup Streamlit UI
 st.title("Web Scraping AI Agent 🕵️‍♂️")
-st.caption("Scrape institution websites using GPT-4o-mini on Streamlit Cloud.")
+st.caption("Scrape institution websites using GPT-4o-mini.")
 
-# Load OpenAI API key from Streamlit secrets
-openai_api_key = st.secrets["openai"]["api_key"]
-
-# Set up config for SmartScraperGraph using GPT-4o-mini
 graph_config = {
     "llm": {
         "api_key": openai_api_key,
@@ -28,115 +24,93 @@ graph_config = {
     },
 }
 
-# Initialize app state
+# Step management
 if "step" not in st.session_state:
     st.session_state.step = 1
 
 # Step 1: Institution Name
 if st.session_state.step == 1:
-    institution_name = st.text_input("Enter the Institution Name:")
-    if institution_name:
-        st.session_state.institution_name = institution_name
+    name = st.text_input("Enter the institution name:")
+    if name:
+        st.session_state.institution_name = name
         st.session_state.step = 2
-        safe_rerun()
+        st.rerun()
 
 # Step 2: Institution Homepage URL
 elif st.session_state.step == 2:
-    homepage_url = st.text_input("Enter the Institution's Homepage URL:")
-    if homepage_url:
-        st.session_state.homepage_url = homepage_url
+    homepage = st.text_input("Enter the institution’s homepage URL:")
+    if homepage:
+        st.session_state.homepage_url = homepage
         st.session_state.step = 3
-        safe_rerun()
+        st.rerun()
 
-# Step 3: Desired Programs/Departments
+# Step 3: Desired Programs Info
 elif st.session_state.step == 3:
-    program_info = st.text_area(
-        "Enter program names, desired levels (Undergrad, Master's, PhD), and departments (e.g., College of Education):"
-    )
-    if program_info:
-        st.session_state.program_info = program_info
+    info = st.text_area("Enter program names, levels (UG, MS, PhD), and departments (e.g. College of Business):")
+    if info:
+        st.session_state.program_info = info
         st.session_state.step = 4
-        safe_rerun()
+        st.rerun()
 
-# Step 4: Scrape & Show URLs for Manual Validation
+# Step 4: Scrape for Links
 elif st.session_state.step == 4:
-    st.subheader("Step 4: Validate Discovered URLs")
-    st.write(
-        "Click 'List URLs' to scrape related program pages. Then test each link to make sure they don’t lead to 404 errors. "
-        "Once you're done testing, click 'Create Tabular Output'."
-    )
-
+    st.subheader("Validate URLs")
+    st.write("Click below to list discovered academic program URLs. Then manually test to ensure none are 404s.")
+    
     if st.button("List URLs"):
         prompt = (
-            f"Scrape the website for '{st.session_state.institution_name}' with homepage {st.session_state.homepage_url} "
-            f"to find pages related to: {st.session_state.program_info}. "
-            "Return a list of valid academic program URLs that do not lead to 404 errors."
+            f"Scrape {st.session_state.homepage_url} for program pages related to: "
+            f"{st.session_state.program_info}. Return valid academic program URLs (no 404s)."
         )
-
-        smart_scraper_graph = SmartScraperGraph(
+        scraper = SmartScraperGraph(
             prompt=prompt,
             source=st.session_state.homepage_url,
             config=graph_config
         )
-
-        result = smart_scraper_graph.run()
-        urls = []
-
-        if isinstance(result, list):
-            urls = result
-        elif isinstance(result, str):
+        try:
+            result = scraper.run()
             urls = [line.strip() for line in result.splitlines() if line.strip()]
+            if urls:
+                st.session_state.urls = urls
+                st.success("✅ Test these URLs before proceeding:")
+                for url in urls:
+                    st.markdown(f"- [{url}]({url})")
+                st.session_state.step = 5
+                st.rerun()
+            else:
+                st.error("No URLs found.")
+        except Exception as e:
+            st.error(f"Scraping failed: {e}")
 
-        if urls:
-            st.session_state.urls = urls
-            st.success("Click links below to test:")
-            for url in urls:
-                st.markdown(f"- [{url}]({url})")
-            st.session_state.step = 5
-            safe_rerun()
-        else:
-            st.error("No URLs found. Please check your inputs or try again.")
-
-# Step 5: Create Tabular Output
+# Step 5: Generate Tabular Output
 elif st.session_state.step == 5:
-    st.subheader("Step 5: Create Tabular Output")
-    st.write(
-        """
-        Click the button below to generate a program table with:
-
-        - Column A: Program name (from h1 or similar tag)
-        - Column B: Full valid program URL
-        - Column C: URL path after base (e.g., "majors/accounting-bs")
-        - Columns D, E, F: Blank
-        - Column G: Pattern from Column C (e.g., "/majors/.*bs")
-        """
-    )
+    st.subheader("Generate Tabular Output")
+    st.write("Creates a table with program names, URLs, and structured patterns.")
 
     if st.button("Create Tabular Output"):
-        prompt_table = (
-            f"From the homepage {st.session_state.homepage_url} and the following program pages, "
-            "generate a Markdown table:\n\n"
-            "A: Program name from h1 or similar tag\n"
-            "B: Full program URL\n"
-            "C: URL path after homepage\n"
-            "D, E, F: Leave blank\n"
-            "G: Regex pattern based on Column C\n\n"
-            "Only include valid (non-404) pages. Return Markdown table only."
+        prompt = (
+            f"From {st.session_state.homepage_url}, return a Markdown table with:\n"
+            f"Column A: Program name (h1 tag or similar)\n"
+            f"Column B: Full valid URL\n"
+            f"Column C: Relative path after base URL\n"
+            f"Columns D–F: Leave blank\n"
+            f"Column G: Pattern based on C (e.g., /majors/.*bs)"
         )
-
-        smart_scraper_graph_table = SmartScraperGraph(
-            prompt=prompt_table,
+        scraper = SmartScraperGraph(
+            prompt=prompt,
             source=st.session_state.homepage_url,
             config=graph_config
         )
+        try:
+            output = scraper.run()
+            st.markdown("### Tabular Output")
+            st.markdown(output)
+            st.session_state.step = 6
+            st.rerun()
+        except Exception as e:
+            st.error(f"Tabular output failed: {e}")
 
-        table_result = smart_scraper_graph_table.run()
-        st.write("### Tabular Output")
-        st.markdown(table_result)
-        st.session_state.step = 6
-        safe_rerun()
-
-# Step 6: Completion
+# Step 6: Done
 elif st.session_state.step == 6:
-    st.success("🎉 Scraping and table creation complete.")
+    st.success("✅ Scraping and table complete!")
     st.balloons()
