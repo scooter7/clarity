@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 st.title("Academic Program Spreadsheet Generator")
 
 st.write("Enter the base URL for academic programs and a comma-separated list of title tags (or CSS selectors).")
-base_url = st.text_input("Enter base URL", value="https://www.ithaca.edu/academics")
+base_url = st.text_input("Enter base URL", value="https://admissions.msu.edu/academics/majors-degrees-programs")
 st.markdown("**Title Tag Flexibility:** Specify a comma-separated list of HTML tags or CSS selectors to locate the program title. For example: `h1,h2,div.program-title`")
 title_tags_input = st.text_input("Title tags to search", value="h1,h2")
 
@@ -74,12 +74,12 @@ if st.button("Create Spreadsheet"):
                             break
 
                     if program_title:
-                        # Compute the raw URL suffix (the part after the base URL).
+                        # Compute the raw URL suffix (the part after the base URL)
                         raw_suffix = url.replace(base_url, "").lstrip("/")
-                        if raw_suffix:
-                            # Prepend the last element of the base URL to form column C.
+                        if raw_suffix:  # If non-empty
+                            # Prepend the last segment of the base URL to form column C.
                             col_C = f"{base_last}/{raw_suffix}"
-                            # For regex pattern, use base_last as the directory.
+                            # Use base_last as the directory in the regex pattern.
                             parts = raw_suffix.split("/")
                             program_slug = parts[-1] if parts else ""
                             if "-" in program_slug:
