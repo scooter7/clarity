@@ -7,144 +7,176 @@ import re
 import openai
 import pandas as pd
 
-# ✅ Load API key
-try:
-    openai.api_key = st.secrets["openai"]["api_key"]
-except Exception:
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+# ✅ Get OpenAI API key from Railway environment variable or secrets
+openai.api_key = (
+    st.secrets["openai"]["api_key"]
+    if "openai" in st.secrets and "api_key" in st.secrets["openai"]
+    else os.getenv("OPENAI_API_KEY")
+)
 
 if not openai.api_key:
-    st.error("⚠️ OpenAI API key not found. Set it in Railway ENV or Streamlit secrets.")
+    st.error("⚠️ OpenAI API key not found. Add it to Railway environment variables or Streamlit secrets.")
     st.stop()
 
-st.title("🎓 Academic Program Scraper (Manual)")
-st.caption("Crawls academic pages, extracts program names, and outputs structured spreadsheet.")
+# ✅ UI Setup
+st.title("🎯 Granular Program Page Finder")
+st.caption("Find Master's and PhD program pages from specified schools and departments.")
 
-# Store session state
+# Step-by-step input flow
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# Step 1: Institution name
+# Step 1: Institution Name
 if st.session_state.step == 1:
-    name = st.text_input("Enter the institution name:")
-    if name:
-        st.session_state.institution_name = name
+    inst = st.text_input("Enter the institution name:")
+    if inst:
+        st.session_state.institution_name = inst
         st.session_state.step = 2
         st.rerun()
 
 # Step 2: Homepage URL
 elif st.session_state.step == 2:
-    homepage = st.text_input("Enter the institution homepage URL:")
+    homepage = st.text_input("Enter the homepage URL of the institution:")
     if homepage:
-        st.session_state.homepage_url = homepage
+        st.session_state.homepage = homepage
         st.session_state.step = 3
         st.rerun()
 
-# Step 3: Desired programs/departments
+# Step 3: Program levels and departments
 elif st.session_state.step == 3:
-    info = st.text_area("Enter program names, levels (UG/MS/PhD), and departments (e.g. College of Engineering):")
-    if info:
-        st.session_state.program_info = info
+    criteria = st.text_area(
+        "Enter what you're looking for (e.g., Master's and PhD programs from the School of Engineering, School of Medicine...)"
+    )
+    if criteria:
+        st.session_state.criteria = criteria
         st.session_state.step = 4
         st.rerun()
 
-# Step 4: Crawl and collect candidate URLs
+# Step 4: Crawl and analyze
 elif st.session_state.step == 4:
-    st.subheader("🔍 Step 1: Crawl Homepage for Academic URLs")
-    if st.button("Crawl Site"):
-        base = st.session_state.homepage_url
+    st.info("🔍 Crawling and analyzing the site...")
+
+    def get_links(base_url):
         visited = set()
-        found_urls = []
+        to_visit = [base_url]
+        found_urls = set()
 
-        try:
-            response = requests.get(base, timeout=10)
-            soup = BeautifulSoup(response.text, "html.parser")
+        while to_visit:
+            url = to_visit.pop()
+            if url in visited or not url.startswith(base_url):
+                continue
+            visited.add(url)
 
-            for link in soup.find_all("a", href=True):
-                href = link["href"]
-                if not href.startswith("http"):
-                    href = urljoin(base, href)
-
-                if base in href and href not in visited:
-                    visited.add(href)
-
-                    # Filter for likely academic pages
-                    if any(keyword in href.lower() for keyword in ["program", "major", "degree", "academ", "study"]):
-                        found_urls.append(href)
-
-            st.session_state.found_urls = list(set(found_urls))
-            if found_urls:
-                st.success(f"✅ {len(found_urls)} URLs found!")
-                for url in st.session_state.found_urls:
-                    st.markdown(f"- [{url}]({url})")
-                st.session_state.step = 5
-                st.rerun()
-            else:
-                st.warning("No matching academic URLs found.")
-        except Exception as e:
-            st.error(f"Error while crawling: {e}")
-
-# Step 5: Scrape pages and extract program names
-elif st.session_state.step == 5:
-    st.subheader("📄 Step 2: Extract Programs with GPT-4o-mini")
-
-    if st.button("Extract Programs"):
-        rows = []
-        base_url = st.session_state.homepage_url
-
-        for url in st.session_state.found_urls:
             try:
-                html = requests.get(url, timeout=10).text
-                soup = BeautifulSoup(html, "html.parser")
-                text = soup.get_text(separator="\n", strip=True)
+                res = requests.get(url, timeout=10)
+                if res.status_code != 200:
+                    continue
+                soup = BeautifulSoup(res.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    full_url = urljoin(url, a["href"])
+                    parsed = urlparse(full_url)
+                    cleaned_url = parsed.scheme + "://" + parsed.netloc + parsed.path
+                    if cleaned_url not in visited and base_url in cleaned_url:
+                        found_urls.add(cleaned_url)
+                        to_visit.append(cleaned_url)
+            except Exception:
+                continue
 
-                # Send to OpenAI for structured extraction
-                prompt = (
-                    f"You are analyzing a university page.\n"
-                    f"Here is the text content:\n\n{text[:5000]}\n\n"  # limit tokens
-                    f"From the above, extract a clean list of academic program names (UG/MS/PhD only).\n"
-                    f"Output as a comma-separated list of just the program names."
-                )
+        return list(found_urls)
+
+    with st.spinner("Crawling the site for pages..."):
+        all_links = get_links(st.session_state.homepage)
+
+    st.success(f"🔗 Found {len(all_links)} URLs")
+    st.session_state.crawled_links = all_links
+    st.session_state.step = 5
+    st.rerun()
+
+# Step 5: Use OpenAI to filter & extract actual program pages
+elif st.session_state.step == 5:
+    st.info("🔎 Filtering program-level pages using OpenAI...")
+
+    links = st.session_state.crawled_links
+    criteria = st.session_state.criteria
+    base_url = st.session_state.homepage
+
+    valid_programs = []
+
+    with st.spinner("Querying OpenAI to find matching programs..."):
+        for link in links:
+            try:
+                res = requests.get(link, timeout=10)
+                if res.status_code != 200 or not res.text.strip():
+                    continue
+
+                prompt = f"""
+You are a university website analysis agent.
+
+Please extract the names of individual **Master's or PhD programs** only if the page corresponds to the user's instruction below:
+
+--- USER REQUEST ---
+{criteria}
+---------------------
+
+Do not include general pages, only pages that list or describe individual programs. Use only H1, H2, or meaningful headings/titles. Format each result as:
+
+Program Name 1
+Program Name 2
+...
+                
+Return only valid program names that match the user request, or return "NONE" if the page is irrelevant.
+"""
 
                 response = openai.chat.completions.create(
                     model="gpt-4o",
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {"role": "system", "content": "You extract academic program names from university pages."},
+                        {"role": "user", "content": prompt + "\n\nPage HTML:\n" + res.text[:7000]},
+                    ],
                     temperature=0.3,
                 )
-                answer = response.choices[0].message.content.strip()
-                programs = re.split(r",|\n|•|-", answer)
+
+                result_text = response.choices[0].message.content.strip()
+
+                if result_text.lower().startswith("none"):
+                    continue
+
+                programs = [line.strip("-• ") for line in result_text.split("\n") if line.strip()]
+                if not programs:
+                    continue
+
+                rel_path = re.sub(r'^https?://[^/]+', '', link)
+                pattern = '/' + '/'.join(rel_path.strip('/').split('/')[:-1]) + '/.*'
 
                 for prog in programs:
-                    prog = prog.strip()
-                    if prog:
-                        relative = url.replace(base_url, "").lstrip("/")
-                        pattern = "/" + relative.split("/")[0] + "/.*" if "/" in relative else "/" + relative
-                        rows.append({
-                            "Program": prog,
-                            "Full URL": url,
-                            "Relative Path": relative,
-                            "Col D": "",
-                            "Col E": "",
-                            "Col F": "",
-                            "Pattern": pattern
-                        })
+                    valid_programs.append({
+                        "Program": prog,
+                        "Full URL": link,
+                        "Relative Path": rel_path,
+                        "Col D": "",
+                        "Col E": "",
+                        "Col F": "",
+                        "Pattern": pattern
+                    })
 
-            except Exception as e:
-                st.warning(f"❌ Failed to process {url}: {e}")
+            except Exception:
+                continue
 
-        if rows:
-            df = pd.DataFrame(rows)
-            st.session_state.result_df = df
-            st.session_state.step = 6
-            st.rerun()
-        else:
-            st.warning("No program data was extracted from any pages.")
+    if not valid_programs:
+        st.warning("❌ No valid programs found. Try adjusting your criteria.")
+    else:
+        df = pd.DataFrame(valid_programs)
+        st.session_state.final_df = df
+        st.session_state.step = 6
+        st.rerun()
 
-# Step 6: Display and Download
+# Step 6: Final Table Output
 elif st.session_state.step == 6:
-    st.subheader("✅ Final Program Table")
-    st.dataframe(st.session_state.result_df, use_container_width=True)
+    df = st.session_state.final_df
+    st.success("✅ Final Program Table")
+    st.dataframe(df)
 
-    csv = st.session_state.result_df.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Download CSV", csv, "programs.csv", "text/csv")
+    csv = df.to_csv(index=False)
+    st.download_button("📥 Download CSV", csv, "program_table.csv", "text/csv")
+
     st.balloons()
